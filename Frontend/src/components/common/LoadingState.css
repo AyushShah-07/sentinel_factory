@@ -1,0 +1,23 @@
+.loading-state {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: center;
+  min-height: 220px;
+  color: #c6d1dc;
+}
+
+.loading-state__spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(255, 255, 255, 0.08);
+  border-top-color: #66baf6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

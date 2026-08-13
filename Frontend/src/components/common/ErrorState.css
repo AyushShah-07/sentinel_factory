@@ -1,0 +1,22 @@
+.error-state {
+  padding: 28px;
+  background: #1e262d;
+  border: 1px solid #2b353e;
+  border-radius: 16px;
+  color: #f7d4d4;
+  text-align: center;
+}
+
+.error-state button {
+  margin-top: 16px;
+  padding: 10px 16px;
+  border: 1px solid #3f4b55;
+  background: #172026;
+  color: #f0f5f9;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.error-state button:hover {
+  background: #1e2a33;
+}

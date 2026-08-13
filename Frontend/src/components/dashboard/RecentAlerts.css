@@ -1,0 +1,46 @@
+.panel {
+  background: #131b22;
+  border: 1px solid #222b33;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #1f2933;
+}
+
+.panel__header h3 {
+  margin: 0;
+  color: #eef3f8;
+}
+
+.panel__header a {
+  color: #8abcff;
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+
+.panel__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.panel__table th,
+.panel__table td {
+  padding: 14px 20px;
+  font-size: 0.9rem;
+  color: #c7d2df;
+}
+
+.panel__table tr:not(:last-child) {
+  border-bottom: 1px solid #1f2933;
+}
+
+.panel__empty {
+  padding: 24px;
+  color: #95a4b6;
+}

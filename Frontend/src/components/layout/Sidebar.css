@@ -1,0 +1,85 @@
+.sidebar {
+  width: 280px;
+  min-width: 240px;
+  background: #11151b;
+  border-right: 1px solid #222a32;
+  color: #d8dee9;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 20px;
+  gap: 24px;
+}
+
+.sidebar__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar__title {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.sidebar__subtitle {
+  font-size: 0.8rem;
+  color: #7a8490;
+}
+
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar__link {
+  display: inline-flex;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: #b8c4d3;
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.sidebar__link:hover,
+.sidebar__link.active {
+  background: rgba(83, 137, 243, 0.12);
+  color: #e8f1ff;
+}
+
+.sidebar__footer {
+  margin-top: auto;
+  display: grid;
+  gap: 10px;
+  color: #8d98a5;
+  font-size: 0.82rem;
+}
+
+.sidebar__footer-label {
+  display: block;
+  opacity: 0.8;
+}
+
+.sidebar__footer-status {
+  font-weight: 700;
+}
+
+.status-safe {
+  color: #70d97b;
+}
+
+.status-warning {
+  color: #f2b22b;
+}
+
+.status-critical {
+  color: #ef5a5a;
+}
+
+.sidebar__footer-status.status-warning {
+  color: #f2b22b;
+}

@@ -1,0 +1,26 @@
+.metric-card {
+  background: #141b22;
+  border: 1px solid #222b34;
+  border-radius: 18px;
+  padding: 22px;
+  color: #e7eef5;
+}
+
+.metric-card__label {
+  margin-bottom: 12px;
+  font-size: 0.82rem;
+  color: #7c8a98;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.metric-card__value {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.metric-card__detail {
+  margin-top: 10px;
+  color: #93a1b9;
+  font-size: 0.92rem;
+}
