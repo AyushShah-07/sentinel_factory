@@ -6,6 +6,8 @@ from datetime import datetime
 import cv2
 
 
+from src.integration.connection import BackendClient
+
 # ============================================================
 # EVENT NAMES
 # ============================================================
@@ -370,6 +372,17 @@ class EventLog:
         self._alarm_active = False
 
         self.session_id = None
+
+        # ----------------------------------------------------
+        # SPRING BOOT BACKEND
+        # ----------------------------------------------------
+
+        self.backend_client = BackendClient(
+            base_url="http://localhost:8080",
+        )
+
+        # Must match the cameraId used by your backend/Yolo API.
+        self.camera_id = "CAM-01"
 
     # ========================================================
     # JSON
@@ -1348,6 +1361,12 @@ class EventLog:
                     event
                 )
 
+                # Send PERSON_DETECTED to Spring Boot
+                self.backend_client.send_detection(
+                    event,
+                    self.camera_id,
+                )
+
             # =================================================
             # CURRENT BODY ZONE
             # =================================================
@@ -1449,6 +1468,12 @@ class EventLog:
                             event
                         )
 
+                        # Send DANGER incident to Spring Boot
+                        self.backend_client.send_incident(
+                            event,
+                            self.camera_id,
+                        )
+
                 else:
 
                     # -----------------------------------------
@@ -1508,6 +1533,12 @@ class EventLog:
 
                 emitted.append(
                     event
+                )
+
+                # Send WARNING incident to Spring Boot
+                self.backend_client.send_incident(
+                    event,
+                    self.camera_id,
                 )
 
             # =================================================
@@ -1702,4 +1733,3 @@ class EventLog:
         self._alarm_active = False
 
         return []
-

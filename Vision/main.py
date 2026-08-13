@@ -1221,8 +1221,7 @@ class ZoneXApp:
         # -------------------------------------------------------------------
 
         self.backend = BackendClient(
-            base_url="http://localhost:8080",
-            endpoint="/api/incidents",
+            base_url="http://localhost:8080"
         )
 
         # -------------------------------------------------------------------
