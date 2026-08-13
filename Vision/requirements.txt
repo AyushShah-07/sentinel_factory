@@ -1,0 +1,12 @@
+# ZONE X - Phase 1 (Computer Vision prototype)
+# Only what the prototype actually needs. Nothing else.
+
+ultralytics>=8.3.0      # YOLOv8 model + pretrained weights downloader
+                        # (also provides the yolov8n-pose model used for
+                        #  wrist / reach-in detection -- no extra package)
+opencv-python>=4.8.0    # camera capture, drawing, mouse/keyboard window events
+numpy>=1.24.0           # array maths behind the geometry helpers
+
+# torch / torchvision are installed automatically as ultralytics dependencies.
+# For NVIDIA GPU acceleration, install a CUDA build of torch instead:
+#   https://pytorch.org/get-started/locally/

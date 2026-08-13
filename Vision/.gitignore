@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime logs
+logs/
+incidents/
+
+# Environment/secrets
+.env
+.env.*
+
+# Python cache
+.pytest_cache/
+
+# OpenCV / temporary files
+*.tmp
+*.temp
+
+# OS
+.DS_Store
+Thumbs.db
