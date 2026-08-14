@@ -5,8 +5,14 @@ from datetime import datetime
 
 import cv2
 
+from src.events.helpers import (
+    now,
+    person_id,
+    zone_type,
+    hand_is_in_danger,
+    danger_source,
+)
 
-from src.integration.connection import BackendClient
 
 # ============================================================
 # EVENT NAMES
@@ -23,193 +29,6 @@ HAND_DANGER_INCIDENT_NAME = (
 WARNING_INCIDENT_NAME = (
     "Person stays in the warning zone for more than 10s"
 )
-
-
-# ============================================================
-# TIME
-# ============================================================
-
-def _now():
-    return datetime.now().isoformat(
-        timespec="milliseconds"
-    )
-
-
-# ============================================================
-# PERSON ID
-# ============================================================
-
-def _person_id(person):
-    """
-    Convert tracker information into:
-
-        tracker 1 -> P1
-        tracker 2 -> P2
-        tracker 3 -> P3
-    """
-
-    if person is None:
-        return None
-
-    # Already assigned person ID
-    person_id = person.get("person_id")
-
-    if person_id:
-        return str(person_id)
-
-    # Identity information
-    identity = person.get("identity") or {}
-
-    identity_id = identity.get("person_id")
-
-    if identity_id:
-        return str(identity_id)
-
-    # Tracker ID
-    raw_id = person.get("id")
-
-    if raw_id is None:
-        return None
-
-    return f"P{raw_id}"
-
-
-# ============================================================
-# ZONE NORMALIZATION
-# ============================================================
-
-def _zone_value(person):
-    """
-    Get raw zone value.
-
-    Examples:
-
-        DANGER
-        DANGER_1
-        WARNING
-        WARNING_1
-        SAFE
-        OUTSIDE
-    """
-
-    if not person:
-        return None
-
-    zone = person.get("zone")
-
-    if zone is None:
-        return None
-
-    return str(zone).strip().upper()
-
-
-def _zone_type(person):
-    """
-    Normalize zone names.
-
-        DANGER       -> DANGER
-        DANGER_1     -> DANGER
-        DANGER_2     -> DANGER
-
-        WARNING      -> WARNING
-        WARNING_1    -> WARNING
-        WARNING_2    -> WARNING
-
-        SAFE         -> SAFE
-        SAFE_1       -> SAFE
-
-        OUTSIDE      -> OUTSIDE
-    """
-
-    zone = _zone_value(person)
-
-    if not zone:
-        return None
-
-    # Exact zones
-    if zone in {
-        "DANGER",
-        "WARNING",
-        "SAFE",
-        "OUTSIDE",
-    }:
-        return zone
-
-    # Zone IDs
-    if zone.startswith("DANGER_"):
-        return "DANGER"
-
-    if zone.startswith("WARNING_"):
-        return "WARNING"
-
-    if zone.startswith("SAFE_"):
-        return "SAFE"
-
-    if zone.startswith("OUTSIDE_"):
-        return "OUTSIDE"
-
-    return zone
-
-
-# ============================================================
-# HAND / WRIST DANGER
-# ============================================================
-
-def _hand_is_in_danger(person):
-    """
-    The pose/zone pipeline already provides:
-
-        hand_in_danger = True / False
-
-    This allows:
-
-        body  -> OUTSIDE
-        hand  -> DANGER
-
-    to still create a danger incident.
-    """
-
-    if not person:
-        return False
-
-    return bool(
-        person.get(
-            "hand_in_danger",
-            False,
-        )
-    )
-
-
-def _danger_source(person):
-    """
-    Determine why the danger incident occurred.
-
-    Returns:
-
-        BODY
-        HAND
-        BODY_AND_HAND
-        None
-    """
-
-    body_danger = (
-        _zone_type(person) == "DANGER"
-    )
-
-    hand_danger = _hand_is_in_danger(
-        person
-    )
-
-    if body_danger and hand_danger:
-        return "BODY_AND_HAND"
-
-    if body_danger:
-        return "BODY"
-
-    if hand_danger:
-        return "HAND"
-
-    return None
 
 
 # ============================================================
@@ -373,17 +192,6 @@ class EventLog:
 
         self.session_id = None
 
-        # ----------------------------------------------------
-        # SPRING BOOT BACKEND
-        # ----------------------------------------------------
-
-        self.backend_client = BackendClient(
-            base_url="http://localhost:8080",
-        )
-
-        # Must match the cameraId used by your backend/Yolo API.
-        self.camera_id = "CAM-01"
-
     # ========================================================
     # JSON
     # ========================================================
@@ -476,7 +284,6 @@ class EventLog:
         """
 
         if log_root:
-
             self.log_root = log_root
 
         self.session_id = (
@@ -486,30 +293,24 @@ class EventLog:
         )
 
         self._previous.clear()
-
         self._warning_state.clear()
-
         self._danger_active.clear()
 
         return None
 
     def close_session(self):
-
         return None
 
     @property
     def events_path(self):
-
         return None
 
     @property
     def session_path(self):
-
         return None
 
     @property
     def is_open(self):
-
         return True
 
     # ========================================================
@@ -518,23 +319,21 @@ class EventLog:
 
     def _person_detected(self, person):
 
-        person_id = _person_id(
-            person
-        )
+        person_id_value = person_id(person)
 
-        if person_id is None:
+        if person_id_value is None:
             return None
 
         # Already detected
-        if person_id in self._detected_persons:
+        if person_id_value in self._detected_persons:
             return None
 
-        timestamp = _now()
+        timestamp = now()
 
         record = {
             "timestamp": timestamp,
             "event": PERSON_DETECTED,
-            "person_id": person_id,
+            "person_id": person_id_value,
         }
 
         self._append_json(
@@ -543,12 +342,12 @@ class EventLog:
         )
 
         self._detected_persons.add(
-            person_id
+            person_id_value
         )
 
         print(
             f"[Event] {timestamp} "
-            f"PERSON_DETECTED {person_id}"
+            f"PERSON_DETECTED {person_id_value}"
         )
 
         return record
@@ -560,12 +359,11 @@ class EventLog:
     def _save_frame(
         self,
         frame,
-        person_id,
+        person_id_value,
         incident_type,
     ):
 
         if not self.save_incident_images:
-
             return None
 
         # ----------------------------------------------------
@@ -615,15 +413,11 @@ class EventLog:
 
         if incident_type == "danger":
 
-            directory = (
-                self.danger_image_dir
-            )
+            directory = self.danger_image_dir
 
         elif incident_type == "warning":
 
-            directory = (
-                self.warning_image_dir
-            )
+            directory = self.warning_image_dir
 
         else:
 
@@ -644,7 +438,7 @@ class EventLog:
         # ----------------------------------------------------
 
         filename = (
-            f"{person_id}_{timestamp_text}.jpg"
+            f"{person_id_value}_{timestamp_text}.jpg"
         )
 
         path = os.path.abspath(
@@ -703,7 +497,7 @@ class EventLog:
 
     def _is_assigned_person(
         self,
-        person_id,
+        person_id_value,
     ):
         """
         Optional filtering.
@@ -747,7 +541,7 @@ class EventLog:
             return True
 
         return (
-            str(person_id)
+            str(person_id_value)
             in assigned
         )
 
@@ -762,11 +556,9 @@ class EventLog:
         source=None,
     ):
 
-        person_id = _person_id(
-            person
-        )
+        person_id_value = person_id(person)
 
-        if person_id is None:
+        if person_id_value is None:
             return None
 
         # ----------------------------------------------------
@@ -774,11 +566,11 @@ class EventLog:
         # ----------------------------------------------------
 
         if not self._is_assigned_person(
-            person_id
+            person_id_value
         ):
 
             print(
-                f"[DANGER] {person_id} is not assigned. "
+                f"[DANGER] {person_id_value} is not assigned. "
                 "Incident ignored."
             )
 
@@ -788,8 +580,7 @@ class EventLog:
         # DUPLICATE PROTECTION
         # ----------------------------------------------------
 
-        if person_id in self._danger_active:
-
+        if person_id_value in self._danger_active:
             return None
 
         # ----------------------------------------------------
@@ -797,10 +588,7 @@ class EventLog:
         # ----------------------------------------------------
 
         if source is None:
-
-            source = _danger_source(
-                person
-            )
+            source = danger_source(person)
 
         if source is None:
             return None
@@ -809,9 +597,7 @@ class EventLog:
         # ZONE DATA
         # ----------------------------------------------------
 
-        body_zone = _zone_type(
-            person
-        )
+        body_zone = zone_type(person)
 
         body_zone_id = person.get(
             "zone_id"
@@ -849,7 +635,7 @@ class EventLog:
             )
 
         print(
-            f"[DANGER] {person_id} "
+            f"[DANGER] {person_id_value} "
             f"INCIDENT SOURCE={source} "
             f"BODY={body_zone}/{body_zone_id} "
             f"HAND={hand_zone}/{hand_zone_id}"
@@ -859,11 +645,11 @@ class EventLog:
         # CAPTURE IMMEDIATELY
         # ----------------------------------------------------
 
-        timestamp = _now()
+        timestamp = now()
 
         picture = self._save_frame(
             frame,
-            person_id,
+            person_id_value,
             "danger",
         )
 
@@ -877,7 +663,7 @@ class EventLog:
         ):
 
             print(
-                f"[DANGER] {person_id}: "
+                f"[DANGER] {person_id_value}: "
                 "image capture FAILED"
             )
 
@@ -889,7 +675,7 @@ class EventLog:
 
         record = {
             "timestamp": timestamp,
-            "person_id": person_id,
+            "person_id": person_id_value,
             "incident_name": incident_name,
             "incident_type": "DANGER",
             "source": source,
@@ -913,7 +699,7 @@ class EventLog:
         # ----------------------------------------------------
 
         self._danger_active[
-            person_id
+            person_id_value
         ] = source
 
         self.events.append(
@@ -950,16 +736,15 @@ class EventLog:
         print(
             f"[INCIDENT SAVED] "
             f"{incident_name} | "
-            f"{person_id} | "
+            f"{person_id_value} | "
             f"{source}"
         )
 
         return record
 
     # ========================================================
-    # WARNING INCIDENT
-    # ========================================================
-
+# WARNING INCIDENT
+# ========================================================
     def _warning_update(
         self,
         person,
@@ -968,87 +753,124 @@ class EventLog:
         """
         WARNING DWELL LOGIC
 
-        A warning incident occurs only when:
+        A warning incident occurs when either:
 
-            person.zone == WARNING
+        1. The person's BODY is inside a WARNING zone
+        OR
+        2. The person's HAND is inside a WARNING zone
 
-        continuously for:
+        The person must remain continuously in the same
+        warning zone for warning_dwell_threshold seconds.
 
-            warning_dwell_threshold seconds
+        Changing WARNING_1 -> WARNING_2 resets the timer.
 
-        Default:
+        Leaving all warning zones resets the timer.
 
-            10 seconds
-
-        Important:
-
-        - Hand zone is NOT used here.
-        - Danger logic is NOT used here.
-        - WARNING_1 and WARNING_2 are treated as
-          different warning zones.
-        - Leaving WARNING resets the timer.
-        - Changing WARNING zone resets the timer.
-        - One incident is generated per continuous
-          warning-zone stay.
+        Only one incident is generated per continuous stay.
         """
 
-        person_id = _person_id(
-            person
-        )
+        # ====================================================
+        # PERSON ID
+        # ====================================================
 
-        if person_id is None:
+        pid = person_id(person)
+
+        if pid is None:
             return None
 
-        # ----------------------------------------------------
-        # CURRENT BODY ZONE
-        # ----------------------------------------------------
-
-        zone = _zone_type(
-            person
-        )
-
-        zone_id = person.get(
-            "zone_id"
-        )
-
-        if zone_id is not None:
-
-            zone_id = str(
-                zone_id
-            ).strip()
-
         # ====================================================
-        # PERSON NOT IN WARNING
+        # BODY WARNING DATA
         # ====================================================
 
-        if zone != "WARNING":
+        body_zone = zone_type(person)
 
-            if person_id in self._warning_state:
+        body_zone_id = person.get("zone_id")
 
-                state = self._warning_state.get(
-                    person_id
+        if body_zone_id is not None:
+            body_zone_id = str(body_zone_id).strip()
+
+        # ====================================================
+        # HAND WARNING DATA
+        # ====================================================
+
+        hand_zone = person.get("hand_zone")
+
+        hand_zone_id = person.get("hand_zone_id")
+
+        if hand_zone_id is not None:
+            hand_zone_id = str(hand_zone_id).strip()
+
+        # ====================================================
+        # DETERMINE WARNING ZONE
+        #
+        # BODY HAS PRIORITY
+        # ====================================================
+
+        warning_zone = None
+        warning_zone_id = None
+        warning_source = None
+
+        # ----------------------------------------------------
+        # BODY IS IN WARNING
+        # ----------------------------------------------------
+
+        if body_zone == "WARNING":
+
+            warning_zone = "WARNING"
+            warning_zone_id = body_zone_id
+            warning_source = "BODY"
+
+        # ----------------------------------------------------
+        # OTHERWISE CHECK HAND
+        # ----------------------------------------------------
+
+        elif hand_zone == "WARNING":
+
+            warning_zone = "WARNING"
+            warning_zone_id = hand_zone_id
+            warning_source = "HAND"
+
+        # ====================================================
+        # DEBUG
+        # ====================================================
+
+        print(
+            f"[WARNING DEBUG] "
+            f"PID={pid} "
+            f"body_zone={repr(body_zone)} "
+            f"body_zone_id={repr(body_zone_id)} "
+            f"hand_zone={repr(hand_zone)} "
+            f"hand_zone_id={repr(hand_zone_id)} "
+            f"active_warning={repr(warning_zone_id)} "
+            f"source={repr(warning_source)} "
+            f"threshold={self.warning_dwell_threshold}"
+        )
+
+        # ====================================================
+        # NOT IN WARNING
+        # ====================================================
+
+        if warning_zone != "WARNING":
+
+            state = self._warning_state.get(pid)
+
+            if state is not None:
+
+                elapsed = (
+                    time.monotonic()
+                    - state["entered_at"]
                 )
 
-                if state:
-
-                    elapsed = (
-                        time.monotonic()
-                        - state["entered_at"]
-                    )
-
-                    print(
-                        f"[WARNING] {person_id} "
-                        f"LEFT WARNING "
-                        f"zone={state.get('zone_id')} "
-                        f"after {elapsed:.2f}s"
-                    )
-
-            # ------------------------------------------------
-            # RESET WARNING TIMER
-            # ------------------------------------------------
+                print(
+                    f"[WARNING] {pid} "
+                    f"LEFT WARNING "
+                    f"zone={state.get('zone_id')} "
+                    f"source={state.get('source')} "
+                    f"after {elapsed:.2f}s"
+                )
 
             self._warning_state.pop(
-                person_id,
+                pid,
                 None,
             )
 
@@ -1058,28 +880,22 @@ class EventLog:
         # NEW WARNING ENTRY
         # ====================================================
 
-        state = self._warning_state.get(
-            person_id
-        )
+        state = self._warning_state.get(pid)
 
         if state is None:
 
-            self._warning_state[
-                person_id
-            ] = {
-
-                "zone_id": zone_id,
-
-                "entered_at":
-                    time.monotonic(),
-
+            self._warning_state[pid] = {
+                "zone_id": warning_zone_id,
+                "entered_at": time.monotonic(),
                 "triggered": False,
+                "source": warning_source,
             }
 
             print(
-                f"[WARNING] {person_id} "
+                f"[WARNING] {pid} "
                 f"ENTERED WARNING "
-                f"zone={zone_id}"
+                f"zone={warning_zone_id} "
+                f"source={warning_source}"
             )
 
             return None
@@ -1088,46 +904,53 @@ class EventLog:
         # WARNING ZONE CHANGED
         # ====================================================
 
-        if (
-            state.get("zone_id")
-            != zone_id
-        ):
+        if state.get("zone_id") != warning_zone_id:
 
             print(
-                f"[WARNING] {person_id} "
+                f"[WARNING] {pid} "
                 f"WARNING ZONE CHANGED "
                 f"{state.get('zone_id')} "
-                f"-> {zone_id}"
+                f"-> {warning_zone_id}"
             )
 
-            # Restart timer.
-            self._warning_state[
-                person_id
-            ] = {
-
-                "zone_id": zone_id,
-
-                "entered_at":
-                    time.monotonic(),
-
+            self._warning_state[pid] = {
+                "zone_id": warning_zone_id,
+                "entered_at": time.monotonic(),
                 "triggered": False,
+                "source": warning_source,
             }
 
             return None
 
         # ====================================================
+        # SOURCE CHANGED
+        #
+        # BODY -> HAND or HAND -> BODY
+        #
+        # Keep timer because person is still in the same
+        # WARNING zone.
+        # ====================================================
+
+        if state.get("source") != warning_source:
+
+            print(
+                f"[WARNING] {pid} "
+                f"WARNING SOURCE CHANGED "
+                f"{state.get('source')} "
+                f"-> {warning_source}"
+            )
+
+            state["source"] = warning_source
+
+        # ====================================================
         # ALREADY TRIGGERED
         # ====================================================
 
-        if state.get(
-            "triggered",
-            False,
-        ):
-
+        if state.get("triggered", False):
             return None
 
         # ====================================================
-        # DWELL TIME
+        # CALCULATE DWELL TIME
         # ====================================================
 
         elapsed = (
@@ -1135,43 +958,45 @@ class EventLog:
             - state["entered_at"]
         )
 
+        print(
+            f"[WARNING TIMER] "
+            f"{pid} "
+            f"zone={warning_zone_id} "
+            f"source={warning_source} "
+            f"elapsed={elapsed:.2f}s/"
+            f"{self.warning_dwell_threshold:.2f}s"
+        )
+
         # ====================================================
-        # NOT YET 10 SECONDS
+        # THRESHOLD NOT REACHED
         # ====================================================
 
-        if (
-            elapsed
-            < self.warning_dwell_threshold
-        ):
-
+        if elapsed < self.warning_dwell_threshold:
             return None
 
         # ====================================================
-        # WARNING INCIDENT
+        # WARNING INCIDENT TRIGGERED
         # ====================================================
 
-        timestamp = _now()
+        timestamp = now()
 
         print(
-            f"[WARNING] {person_id} "
+            f"[WARNING] {pid} "
             f"stayed {elapsed:.2f}s "
             f"in WARNING "
-            f"zone={zone_id}"
+            f"zone={warning_zone_id} "
+            f"source={warning_source}"
         )
 
-        # ----------------------------------------------------
-        # CAPTURE FRAME
-        # ----------------------------------------------------
+        # ====================================================
+        # SAVE INCIDENT IMAGE
+        # ====================================================
 
         picture = self._save_frame(
             frame,
-            person_id,
+            pid,
             "warning",
         )
-
-        # ----------------------------------------------------
-        # IMAGE FAILURE
-        # ----------------------------------------------------
 
         if (
             self.save_incident_images
@@ -1179,21 +1004,19 @@ class EventLog:
         ):
 
             print(
-                f"[WARNING] {person_id}: "
+                f"[WARNING] {pid}: "
                 "image capture FAILED"
             )
 
             return None
 
         # ====================================================
-        # JSON RECORD
+        # CREATE EVENT
         # ====================================================
 
         record = {
-
             "timestamp": timestamp,
-
-            "person_id": person_id,
+            "person_id": pid,
 
             "incident_name":
                 WARNING_INCIDENT_NAME,
@@ -1202,10 +1025,13 @@ class EventLog:
                 "WARNING",
 
             "zone":
-                zone,
+                "WARNING",
 
             "zone_id":
-                zone_id,
+                warning_zone_id,
+
+            "source":
+                warning_source,
 
             "dwell_seconds":
                 round(
@@ -1216,6 +1042,10 @@ class EventLog:
             "picture":
                 picture,
         }
+
+        # ====================================================
+        # SAVE JSON
+        # ====================================================
 
         self._append_json(
             self.warning_path,
@@ -1263,11 +1093,16 @@ class EventLog:
                     exc,
                 )
 
+        # ====================================================
+        # LOG
+        # ====================================================
+
         print(
             f"[INCIDENT SAVED] "
             f"{WARNING_INCIDENT_NAME} | "
-            f"{person_id} | "
-            f"zone={zone_id} | "
+            f"{pid} | "
+            f"zone={warning_zone_id} | "
+            f"source={warning_source} | "
             f"dwell={elapsed:.2f}s"
         )
 
@@ -1294,7 +1129,6 @@ class EventLog:
         # ----------------------------------------------------
 
         if people is None:
-
             people = []
 
         # ----------------------------------------------------
@@ -1312,11 +1146,9 @@ class EventLog:
             if not person:
                 continue
 
-            person_id = _person_id(
-                person
-            )
+            person_id_value = person_id(person)
 
-            if person_id is None:
+            if person_id_value is None:
                 continue
 
             # ------------------------------------------------
@@ -1330,7 +1162,7 @@ class EventLog:
 
             print(
                 "[DEBUG ZONE]",
-                person_id,
+                person_id_value,
                 "zone=",
                 person.get("zone"),
                 "zone_id=",
@@ -1344,7 +1176,7 @@ class EventLog:
             )
 
             current_ids.add(
-                person_id
+                person_id_value
             )
 
             # =================================================
@@ -1356,24 +1188,13 @@ class EventLog:
             )
 
             if event is not None:
-
-                emitted.append(
-                    event
-                )
-
-                # Send PERSON_DETECTED to Spring Boot
-                self.backend_client.send_detection(
-                    event,
-                    self.camera_id,
-                )
+                emitted.append(event)
 
             # =================================================
             # CURRENT BODY ZONE
             # =================================================
 
-            current_zone = _zone_type(
-                person
-            )
+            current_zone = zone_type(person)
 
             current_zone_id = person.get(
                 "zone_id"
@@ -1383,10 +1204,8 @@ class EventLog:
             # CURRENT HAND DANGER
             # =================================================
 
-            hand_danger = (
-                _hand_is_in_danger(
-                    person
-                )
+            hand_danger = hand_is_in_danger(
+                person
             )
 
             # =================================================
@@ -1394,13 +1213,11 @@ class EventLog:
             # =================================================
 
             previous = self._previous.get(
-                person_id
+                person_id_value
             )
 
             previous_zone = None
-
             previous_zone_id = None
-
             previous_hand_danger = False
 
             if previous is not None:
@@ -1444,57 +1261,41 @@ class EventLog:
 
                 if not danger_before:
 
-                    source = _danger_source(
+                    source = danger_source(
                         person
                     )
 
                     print(
-                        f"[DANGER] {person_id}: "
+                        f"[DANGER] {person_id_value}: "
                         f"ENTERED DANGER "
                         f"source={source}"
                     )
 
-                    event = (
-                        self._danger_entry(
-                            person,
-                            frame,
-                            source,
-                        )
+                    event = self._danger_entry(
+                        person,
+                        frame,
+                        source,
                     )
 
                     if event is not None:
-
-                        emitted.append(
-                            event
-                        )
-
-                        # Send DANGER incident to Spring Boot
-                        self.backend_client.send_incident(
-                            event,
-                            self.camera_id,
-                        )
+                        emitted.append(event)
 
                 else:
 
-                    # -----------------------------------------
-                    # STILL IN DANGER
-                    #
+                    # Still in danger.
                     # No duplicate incident.
-                    # -----------------------------------------
 
                     if (
-                        person_id
+                        person_id_value
                         not in self._danger_active
                     ):
 
-                        source = (
-                            _danger_source(
-                                person
-                            )
+                        source = danger_source(
+                            person
                         )
 
                         self._danger_active[
-                            person_id
+                            person_id_value
                         ] = (
                             source
                             or "UNKNOWN"
@@ -1502,19 +1303,19 @@ class EventLog:
 
             else:
 
-                # ---------------------------------------------
+                # ------------------------------------------------
                 # PERSON LEFT DANGER
-                # ---------------------------------------------
+                # ------------------------------------------------
 
                 if danger_before:
 
                     print(
-                        f"[DANGER] {person_id} "
+                        f"[DANGER] {person_id_value} "
                         "LEFT DANGER"
                     )
 
                 self._danger_active.pop(
-                    person_id,
+                    person_id_value,
                     None,
                 )
 
@@ -1530,23 +1331,14 @@ class EventLog:
             )
 
             if event is not None:
-
-                emitted.append(
-                    event
-                )
-
-                # Send WARNING incident to Spring Boot
-                self.backend_client.send_incident(
-                    event,
-                    self.camera_id,
-                )
+                emitted.append(event)
 
             # =================================================
             # SAVE CURRENT STATE
             # =================================================
 
             self._previous[
-                person_id
+                person_id_value
             ] = {
 
                 "person":
@@ -1599,10 +1391,10 @@ class EventLog:
         # CLEAN LOST PEOPLE
         # ====================================================
 
-        for person_id in lost_ids:
+        for person_id_value in lost_ids:
 
             previous = self._previous.get(
-                person_id
+                person_id_value
             )
 
             if previous:
@@ -1620,46 +1412,39 @@ class EventLog:
                     )
                 )
 
-                if (
-                    previous_zone
-                    == "WARNING"
-                ):
+                if previous_zone == "WARNING":
 
                     print(
-                        f"[WARNING] {person_id} "
+                        f"[WARNING] {person_id_value} "
                         "LOST while in WARNING"
                     )
 
                 if (
-                    previous_zone
-                    == "DANGER"
+                    previous_zone == "DANGER"
                     or previous_hand
                 ):
 
                     print(
-                        f"[DANGER] {person_id} "
+                        f"[DANGER] {person_id_value} "
                         "LOST while in DANGER"
                     )
 
             # ------------------------------------------------
-            # IMPORTANT
-            #
             # Losing a person resets the warning timer.
-            # If they appear again, it starts from 0.
             # ------------------------------------------------
 
             self._previous.pop(
-                person_id,
+                person_id_value,
                 None,
             )
 
             self._warning_state.pop(
-                person_id,
+                person_id_value,
                 None,
             )
 
             self._danger_active.pop(
-                person_id,
+                person_id_value,
                 None,
             )
 

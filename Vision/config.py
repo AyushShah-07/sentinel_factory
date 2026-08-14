@@ -668,16 +668,3 @@ HAND_ALERT_TEXT = "[!] HAND ENTERED DANGER ZONE"
 BACKEND_URL = "http://localhost:8080"
 BACKEND_INCIDENT_ENDPOINT = "/api/incidents"
 SEND_EVENTS_TO_BACKEND = True
-
-
-# ============================================================
-# WEB DASHBOARD
-# ============================================================
-
-WEB_SERVER_ENABLED = True
-
-WEB_SERVER_HOST = "0.0.0.0"
-
-WEB_SERVER_PORT = 8000
-
-WEB_STREAM_JPEG_QUALITY = 80

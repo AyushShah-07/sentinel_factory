@@ -21,17 +21,11 @@ export const LiveVideoPlayer = ({
       </div>
 
       <div className="live-player__body">
-        {streamUrl ? (
-          <img
-            src={streamUrl}
-            alt="Zone X live camera stream"
-            className="live-player__video"
-          />
-        ) : (
-          <div className="live-player__placeholder">
-            <span>Live camera stream unavailable</span>
-          </div>
-        )}
+        <img
+          src={streamUrl}
+          alt="Zone X live camera feed"
+          className="live-player__video"
+        />
       </div>
     </section>
   )

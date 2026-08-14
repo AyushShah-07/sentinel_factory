@@ -1,242 +1,147 @@
-import requests
+import json
+import os
 import queue
 import threading
+import requests
 
 
 class BackendClient:
+    """
+    Sends safety incidents from the Python CV system
+    to the Spring Boot backend.
 
-    def __init__(self, base_url="http://localhost:8080"):
+    Runs HTTP requests in a background thread so the
+    OpenCV/YOLO processing loop never waits for the backend.
+    """
 
-        self.detection_url = (
-            base_url.rstrip("/")
-            + "/api/yolo/detections"
-        )
-
-        self.incident_url = (
-            base_url.rstrip("/")
-            + "/api/yolo/incidents"
-        )
+    def __init__(
+        self,
+        base_url="http://localhost:8080",
+        endpoint="/api/incidents",
+    ):
+        self.url = base_url.rstrip("/") + endpoint
 
         self._queue = queue.Queue()
         self._running = True
 
         self._worker = threading.Thread(
             target=self._process_queue,
-            daemon=True
+            daemon=True,
         )
-
         self._worker.start()
 
         print("[BACKEND] Client started")
-        print(
-            "[BACKEND] Detection endpoint:",
-            self.detection_url
-        )
-        print(
-            "[BACKEND] Incident endpoint:",
-            self.incident_url
-        )
+        print(f"[BACKEND] Endpoint: {self.url}")
 
-    # =====================================================
-    # PERSON DETECTION
-    # =====================================================
+    # ---------------------------------------------------------
+    # PUBLIC
+    # ---------------------------------------------------------
 
-    def send_detection(self, detection, camera_id):
+    def send_incident(self, event):
+        """
+        Queue one incident for backend delivery.
 
-        if not detection:
+        Does NOT block the camera pipeline.
+        """
+
+        if not event:
             return
 
-        self._queue.put(
-            (
-                "detection",
-                detection,
-                camera_id
-            )
-        )
+        self._queue.put(event)
 
-    # =====================================================
-    # SAFETY INCIDENT
-    # =====================================================
-
-    def send_incident(self, incident, camera_id):
-
-        if not incident:
-            return
-
-        self._queue.put(
-            (
-                "incident",
-                incident,
-                camera_id
-            )
-        )
-
-    # =====================================================
-    # BACKGROUND WORKER
-    # =====================================================
+    # ---------------------------------------------------------
+    # WORKER
+    # ---------------------------------------------------------
 
     def _process_queue(self):
-
         while self._running:
 
             try:
-
-                item = self._queue.get(
-                    timeout=0.5
-                )
+                event = self._queue.get(timeout=0.5)
 
             except queue.Empty:
-
                 continue
 
             try:
-
-                data_type, data, camera_id = item
-
-                if data_type == "detection":
-
-                    self._send_detection(
-                        data,
-                        camera_id
-                    )
-
-                elif data_type == "incident":
-
-                    self._send_incident(
-                        data,
-                        camera_id
-                    )
+                self._send_incident(event)
 
             except Exception as exc:
-
                 print(
-                    "[BACKEND] ERROR:",
-                    exc
+                    f"[BACKEND] ERROR sending incident: {exc}"
                 )
 
             finally:
-
                 self._queue.task_done()
 
-    # =====================================================
-    # SEND PERSON DETECTION
-    # =====================================================
+    # ---------------------------------------------------------
+    # HTTP
+    # ---------------------------------------------------------
 
-    def _send_detection(
-        self,
-        detection,
-        camera_id
-    ):
+    def _send_incident(self, event):
 
-        payload = [
-            {
-                "timestamp":
-                    detection.get("timestamp"),
+        picture = event.get("picture")
 
-                "event":
-                    detection.get("event"),
+        if not picture:
+            print(
+                "[BACKEND] Incident has no picture path"
+            )
+            return
 
-                "person_id":
-                    detection.get("person_id")
+        if not os.path.exists(picture):
+            print(
+                f"[BACKEND] Image not found: {picture}"
+            )
+            return
+
+        # Send the JSON object as one multipart field.
+        event_json = json.dumps(event)
+
+        with open(picture, "rb") as image_file:
+
+            files = {
+                "image": (
+                    os.path.basename(picture),
+                    image_file,
+                    "image/jpeg",
+                )
             }
-        ]
 
-        try:
-
-            response = requests.post(
-                self.detection_url,
-                params={
-                    "cameraId": camera_id
-                },
-                json=payload,
-                timeout=5
-            )
-
-            if response.ok:
-
-                print(
-                    "[BACKEND] Detection sent:",
-                    response.status_code
-                )
-
-            else:
-
-                print(
-                    "[BACKEND] Detection rejected:",
-                    response.status_code
-                )
-
-                print(response.text)
-
-        except requests.RequestException as exc:
-
-            print(
-                "[BACKEND] Detection connection error:",
-                exc
-            )
-
-    # =====================================================
-    # SEND SAFETY INCIDENT
-    # =====================================================
-
-    def _send_incident(
-        self,
-        incident,
-        camera_id
-    ):
-
-        payload = [
-            incident
-        ]
-
-        try:
+            data = {
+                "event": event_json
+            }
 
             response = requests.post(
-                self.incident_url,
-                params={
-                    "cameraId": camera_id
-                },
-                json=payload,
-                timeout=5
+                self.url,
+                data=data,
+                files=files,
+                timeout=5,
             )
 
-            if response.ok:
-
-                print(
-                    "[BACKEND] Incident sent:",
-                    response.status_code
-                )
-
-            else:
-
-                print(
-                    "[BACKEND] Incident rejected:",
-                    response.status_code
-                )
-
-                print(response.text)
-
-        except requests.RequestException as exc:
+        if response.ok:
 
             print(
-                "[BACKEND] Incident connection error:",
-                exc
+                f"[BACKEND] Incident sent successfully "
+                f"({response.status_code})"
             )
 
-    # =====================================================
-    # CLOSE
-    # =====================================================
+        else:
+
+            print(
+                f"[BACKEND] Backend rejected incident: "
+                f"{response.status_code}"
+            )
+
+            print(response.text)
+
+    # ---------------------------------------------------------
+    # SHUTDOWN
+    # ---------------------------------------------------------
 
     def close(self):
 
         self._running = False
 
         if self._worker.is_alive():
+            self._worker.join(timeout=2)
 
-            self._worker.join(
-                timeout=2
-            )
-
-        print(
-            "[BACKEND] Client stopped"
-        )
+        print("[BACKEND] Client stopped")
