@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useAlerts } from '../hooks/useAlerts'
+import { useData } from '../context/DataContext'
 import { LoadingState } from '../components/common/LoadingState'
 import { ErrorState } from '../components/common/ErrorState'
 import { EmptyState } from '../components/common/EmptyState'
@@ -9,7 +9,7 @@ import type { AlertRecord } from '../types'
 const alertHeaders = ['Alert ID', 'Event ID', 'Type', 'Severity', 'Camera', 'Zone', 'Risk', 'Status']
 
 export const Alerts = () => {
-  const { alerts, loading, error, reload } = useAlerts()
+  const { alerts, loadingAlerts: loading, errorAlerts: error, reloadData: reload } = useData()
   const [search, setSearch] = useState('')
   const [selectedAlert, setSelectedAlert] = useState<AlertRecord | null>(null)
 

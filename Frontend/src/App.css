@@ -1,6 +1,4 @@
 .app-shell {
-  display: grid;
-  grid-template-columns: 280px 1fr;
   min-height: 100vh;
   background: #0c1218;
 }
@@ -9,12 +7,15 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  margin-left: 280px;
 }
 
 .page-content {
   flex: 1 1 auto;
-  padding: 24px 28px 32px;
+  min-height: 0;
+  padding: 24px 20px 32px 20px;
   overflow: auto;
+  max-width: 100%;
 }
 
 .page {
@@ -147,9 +148,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+  .app-main {
+    margin-left: 0;
   }
 
   .page-content {

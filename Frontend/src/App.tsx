@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { DataProvider } from './context/DataContext'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
+import { ScrollToTop } from './components/layout/ScrollToTop'
 import { Overview } from './pages/Overview'
 import { LiveMonitoring } from './pages/LiveMonitoring'
 import { Events } from './pages/Events'
@@ -31,6 +32,7 @@ function App() {
         <div className="app-shell">
           <Sidebar />
           <div className="app-main">
+            <ScrollToTop />
             <Topbar />
             <div className="page-content">
               <Routes>

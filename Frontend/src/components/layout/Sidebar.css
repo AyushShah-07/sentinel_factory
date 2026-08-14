@@ -8,6 +8,12 @@
   flex-direction: column;
   padding: 28px 20px;
   gap: 24px;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 100;
+  overflow: auto;
 }
 
 .sidebar__brand {
@@ -82,4 +88,14 @@
 
 .sidebar__footer-status.status-warning {
   color: #f2b22b;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    position: static;
+    width: 100%;
+    min-width: unset;
+    border-right: none;
+    border-bottom: 1px solid #222a32;
+  }
 }

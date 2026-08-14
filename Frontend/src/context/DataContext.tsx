@@ -33,14 +33,61 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
 
     const [eventsResult, alertsResult] = await Promise.allSettled([fetchEvents(), fetchAlerts()])
 
+    const devFallback = Boolean((import.meta as any).env?.DEV)
+
     if (eventsResult.status === 'fulfilled') {
       setEvents(eventsResult.value)
+    } else if (devFallback) {
+      // use sample data in dev and do not treat as fatal error
+      setEvents([
+        {
+          id: 1,
+          cameraId: 'CAM-DEV-01',
+          employeeId: null,
+          eventId: 'EVT-DEV-1',
+          eventType: 'PERSON_DETECTED',
+          riskScore: 0.12,
+          timestamp: new Date().toISOString(),
+          trackId: 'T-DEV-1',
+          zone: 'ZONE-A',
+          machineState: 'ON',
+        },
+        {
+          id: 2,
+          cameraId: 'CAM-DEV-02',
+          employeeId: null,
+          eventId: 'EVT-DEV-2',
+          eventType: 'DANGER_ZONE',
+          riskScore: 0.95,
+          timestamp: new Date().toISOString(),
+          trackId: 'T-DEV-2',
+          zone: 'DANGER',
+          machineState: 'OFF',
+        },
+      ])
+      setErrorEvents(null)
     } else {
       setErrorEvents('Unable to load events.')
     }
 
     if (alertsResult.status === 'fulfilled') {
       setAlerts(alertsResult.value)
+    } else if (devFallback) {
+      setAlerts([
+        {
+          id: 101,
+          alertType: 'PROXIMITY',
+          severity: 'warning',
+          status: 'active',
+          message: 'Worker near hazardous area',
+          timestamp: new Date().toISOString(),
+          eventId: 1,
+          cameraId: 'CAM-DEV-01',
+          zone: 'DANGER',
+          riskScore: 0.88,
+        },
+      ])
+      setErrorAlerts(null)
     } else {
       setErrorAlerts('Unable to load alerts.')
     }

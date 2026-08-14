@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useEvents } from '../hooks/useEvents'
+import { useData } from '../context/DataContext'
 import { LoadingState } from '../components/common/LoadingState'
 import { ErrorState } from '../components/common/ErrorState'
 import { EmptyState } from '../components/common/EmptyState'
@@ -9,7 +9,7 @@ const eventHeaders = ['ID', 'Camera', 'Event', 'Risk', 'Timestamp']
 type SortKey = 'timestamp' | 'riskScore' | 'cameraId' | 'eventType'
 
 export const Events = () => {
-  const { events, loading, error, reload } = useEvents()
+  const { events, loadingEvents: loading, errorEvents: error, reloadData: reload } = useData()
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('timestamp')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
