@@ -1,52 +1,160 @@
 .live-player {
-  background: #11181f;
-  border: 1px solid #212b34;
-  border-radius: 24px;
-  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: #050505;
+  color: white;
   display: flex;
   flex-direction: column;
-  min-height: 420px;
 }
 
 .live-player__header {
-  padding: 22px 24px;
-  border-bottom: 1px solid #1f2933;
+  height: 60px;
+  flex-shrink: 0;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #111;
+  border-bottom: 1px solid #252525;
 }
 
 .live-player__header span {
-  display: block;
-  color: #cbd8e6;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .live-player__header p {
-  margin: 6px 0 0;
-  color: #8291a3;
+  margin: 4px 0 0;
+  color: #888;
+  font-size: 12px;
+}
+
+.live-player__status {
+  color: #00ff66;
+  font-weight: 700;
+}
+
+.live-player__toolbar {
+  min-height: 52px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #0d0d0d;
+  border-bottom: 1px solid #252525;
+}
+
+.live-player__toolbar button {
+  border: 1px solid #333;
+  background: #181818;
+  color: #ddd;
+  padding: 7px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.live-player__toolbar button:hover {
+  background: #242424;
+}
+
+.live-player__toolbar button.active.safe {
+  background: #006b35;
+  border-color: #00ff66;
+}
+
+.live-player__toolbar button.active.warning {
+  background: #765000;
+  border-color: #ffaa00;
+}
+
+.live-player__toolbar button.active.danger {
+  background: #750000;
+  border-color: #ff3333;
+}
+
+.live-player__toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .live-player__body {
-  flex: 1 1 auto;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px;
+  background: #000;
+  overflow: hidden;
 }
 
-.live-player__placeholder {
+.live-video-wrapper {
+  position: relative;
   width: 100%;
-  max-width: 760px;
-  min-height: 240px;
-  border: 2px dashed #2d3a47;
-  border-radius: 18px;
+  height: 100%;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #a5b1c2;
-  text-align: center;
-  gap: 10px;
+  overflow: hidden;
 }
 
-.live-player__placeholder small {
-  color: #6f7f91;
+.live-player__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.live-player__canvas {
+  position: absolute;
+
+  /*
+   * The canvas must cover exactly the displayed video area.
+   * pointer-events stays enabled because this is where the
+   * user clicks to create zone points.
+   */
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+
+  z-index: 2;
+  cursor: crosshair;
+}
+
+/* -------------------------------------------------------
+   Browser fullscreen
+------------------------------------------------------- */
+
+.live-player:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  background: #000;
+}
+
+.live-player:fullscreen .live-player__body {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.live-player:fullscreen .live-video-wrapper {
+  width: 100%;
+  height: 100%;
+}
+
+/* -------------------------------------------------------
+   Prevent browser margins/overflow from affecting layout
+------------------------------------------------------- */
+
+.live-player *,
+.live-player *::before,
+.live-player *::after {
+  box-sizing: border-box;
 }

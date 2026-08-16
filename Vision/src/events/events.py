@@ -316,16 +316,20 @@ class EventLog:
     # ========================================================
     # FIRST PERSON DETECTION
     # ========================================================
-
     def _person_detected(self, person):
 
-        person_id_value = person_id(person)
+        person_id_value = person_id(
+            person
+        )
 
         if person_id_value is None:
             return None
 
         # Already detected
-        if person_id_value in self._detected_persons:
+        if (
+            person_id_value
+            in self._detected_persons
+        ):
             return None
 
         timestamp = now()
@@ -336,6 +340,10 @@ class EventLog:
             "person_id": person_id_value,
         }
 
+        # --------------------------------------------------------
+        # LOCAL JSON
+        # --------------------------------------------------------
+
         self._append_json(
             self.persons_path,
             record,
@@ -345,9 +353,49 @@ class EventLog:
             person_id_value
         )
 
+        # --------------------------------------------------------
+        # MEMORY
+        # --------------------------------------------------------
+
+        self.events.append(
+            record
+        )
+
+        self.total_emitted += 1
+
+        if len(self.events) > self.max_events:
+
+            self.events = self.events[
+                -self.max_events:
+            ]
+
+        # --------------------------------------------------------
+        # BACKEND
+        # --------------------------------------------------------
+
+        if self.on_event:
+
+            try:
+
+                self.on_event(
+                    record
+                )
+
+            except Exception as exc:
+
+                print(
+                    "[Event] on_event error:",
+                    exc,
+                )
+
+        # --------------------------------------------------------
+        # CONSOLE
+        # --------------------------------------------------------
+
         print(
             f"[Event] {timestamp} "
-            f"PERSON_DETECTED {person_id_value}"
+            f"PERSON_DETECTED "
+            f"{person_id_value}"
         )
 
         return record

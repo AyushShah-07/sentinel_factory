@@ -31,6 +31,9 @@ public class IncidentRequest {
 
     private String picture;
 
+    @JsonProperty("dwell_seconds")
+    private Double dwellSeconds;
+
     public IncidentRequest() {
     }
 
@@ -112,5 +115,13 @@ public class IncidentRequest {
 
     public void setPicture(String picture) {
         this.picture = picture;
+    }
+
+    public Double getDwellSeconds() {
+        return dwellSeconds;
+    }
+
+    public void setDwellSeconds(Double dwellSeconds) {
+        this.dwellSeconds = dwellSeconds;
     }
 }

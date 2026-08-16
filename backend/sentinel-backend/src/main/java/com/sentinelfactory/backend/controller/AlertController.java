@@ -2,9 +2,14 @@ package com.sentinelfactory.backend.controller;
 
 import com.sentinelfactory.backend.entity.Alert;
 import com.sentinelfactory.backend.service.AlertService;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.File;
 import java.util.List;
 
 @RestController
@@ -18,28 +23,96 @@ public class AlertController {
     }
 
     @PostMapping
-    public ResponseEntity<Alert> createAlert(@RequestBody Alert alert) {
+    public ResponseEntity<Alert> createAlert(
+            @RequestBody Alert alert) {
 
-        Alert savedAlert = alertService.saveAlert(alert);
+        Alert savedAlert =
+                alertService.saveAlert(alert);
 
-        return ResponseEntity.ok(savedAlert);
+        return ResponseEntity.ok(
+                savedAlert
+        );
     }
 
     @GetMapping
     public ResponseEntity<List<Alert>> getAllAlerts() {
 
-        return ResponseEntity.ok(alertService.getAllAlerts());
+        return ResponseEntity.ok(
+                alertService.getAllAlerts()
+        );
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Alert> getAlertById(@PathVariable Long id) {
+    public ResponseEntity<Alert> getAlertById(
+            @PathVariable Long id) {
 
-        Alert alert = alertService.getAlertById(id);
+        Alert alert =
+                alertService.getAlertById(id);
 
         if (alert == null) {
-            return ResponseEntity.notFound().build();
+            return ResponseEntity
+                    .notFound()
+                    .build();
         }
 
-        return ResponseEntity.ok(alert);
+        return ResponseEntity.ok(
+                alert
+        );
+    }
+
+    // =========================================================
+    // INCIDENT IMAGE
+    // =========================================================
+
+    @GetMapping("/{id}/image")
+    public ResponseEntity<Resource> getAlertImage(
+            @PathVariable Long id) {
+
+        Alert alert =
+                alertService.getAlertById(id);
+
+        if (alert == null) {
+
+            return ResponseEntity
+                    .notFound()
+                    .build();
+        }
+
+        String picturePath =
+                alert.getPicture();
+
+        if (picturePath == null ||
+                picturePath.isBlank()) {
+
+            return ResponseEntity
+                    .notFound()
+                    .build();
+        }
+
+        File imageFile =
+                new File(picturePath);
+
+        if (!imageFile.exists() ||
+                !imageFile.isFile()) {
+
+            return ResponseEntity
+                    .notFound()
+                    .build();
+        }
+
+        Resource resource =
+                new FileSystemResource(
+                        imageFile
+                );
+
+        return ResponseEntity.ok()
+                .contentType(
+                        MediaType.IMAGE_JPEG
+                )
+                .header(
+                        HttpHeaders.CACHE_CONTROL,
+                        "no-cache"
+                )
+                .body(resource);
     }
 }

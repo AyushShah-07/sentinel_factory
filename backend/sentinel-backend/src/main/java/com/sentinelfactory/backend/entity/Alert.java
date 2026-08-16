@@ -1,6 +1,11 @@
 package com.sentinelfactory.backend.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "alerts")
@@ -29,6 +34,34 @@ public class Alert {
     private String cameraId;
 
     private String status;
+
+    private String timestamp;
+
+    @Column(name = "person_id")
+    private String personId;
+
+    @Column(name = "incident_name")
+    private String incidentName;
+
+    private String source;
+
+    @Column(name = "body_zone")
+    private String bodyZone;
+
+    @Column(name = "body_zone_id")
+    private String bodyZoneId;
+
+    @Column(name = "hand_zone")
+    private String handZone;
+
+    @Column(name = "hand_zone_id")
+    private String handZoneId;
+
+    @Column(name = "picture")
+    private String picture;
+
+    @Column(name = "dwell_seconds")
+    private Double dwellSeconds;
 
     public Alert() {
     }
@@ -99,5 +132,85 @@ public class Alert {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getTimestamp() {
+        return timestamp;
+    }
+
+    public void setTimestamp(String timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public String getPersonId() {
+        return personId;
+    }
+
+    public void setPersonId(String personId) {
+        this.personId = personId;
+    }
+
+    public String getIncidentName() {
+        return incidentName;
+    }
+
+    public void setIncidentName(String incidentName) {
+        this.incidentName = incidentName;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+
+    public String getBodyZone() {
+        return bodyZone;
+    }
+
+    public void setBodyZone(String bodyZone) {
+        this.bodyZone = bodyZone;
+    }
+
+    public String getBodyZoneId() {
+        return bodyZoneId;
+    }
+
+    public void setBodyZoneId(String bodyZoneId) {
+        this.bodyZoneId = bodyZoneId;
+    }
+
+    public String getHandZone() {
+        return handZone;
+    }
+
+    public void setHandZone(String handZone) {
+        this.handZone = handZone;
+    }
+
+    public String getHandZoneId() {
+        return handZoneId;
+    }
+
+    public void setHandZoneId(String handZoneId) {
+        this.handZoneId = handZoneId;
+    }
+
+    public String getPicture() {
+        return picture;
+    }
+
+    public void setPicture(String picture) {
+        this.picture = picture;
+    }
+
+    public Double getDwellSeconds() {
+        return dwellSeconds;
+    }
+
+    public void setDwellSeconds(Double dwellSeconds) {
+        this.dwellSeconds = dwellSeconds;
     }
 }

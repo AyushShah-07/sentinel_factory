@@ -45,37 +45,6 @@ Event pipeline:
     BackendClient
         ↓
     Spring Boot Backend
-
-IMPORTANT:
-
-- main.py contains orchestration only.
-- Camera/input handling remains inside FrameSource.
-- Detection remains inside PersonDetector.
-- Tracking remains inside PersonTracker.
-- Zone handling remains inside ZoneManager.
-- Risk decisions remain inside RiskEngine.
-- Event creation remains inside EventLog.
-- Alarm handling remains inside Alarm.
-- Backend communication remains inside BackendClient.
-- Web streaming remains inside FrameBroadcaster/WebServer.
-
-Run:
-
-    python main.py
-
-
-Keyboard:
-
-    s       add SAFE zone
-    w       add WARNING zone
-    d       add DANGER zone
-    r       add DANGER zone
-    Enter   finish polygon
-    c       clear zones
-    m       machine ON/OFF
-    p       pause/resume
-    q       quit
-    Esc     quit
 """
 
 import collections
@@ -88,73 +57,30 @@ import cv2
 import config
 
 from src.visualization import ui
-
 from src.alarm.alarm import Alarm
-
-from src.detection.detector import (
-    ModelLoadError,
-    PersonDetector,
-)
-
-from src.detection.tracker import (
-    PersonTracker,
-)
-
-from src.events.events import (
-    EventLog,
-)
-
+from src.detection.detector import ModelLoadError, PersonDetector
+from src.detection.tracker import PersonTracker
+from src.events.events import EventLog
 from src.camera.frame_source import (
     FrameSource,
     FrameSourceError,
     ProcessingScheduler,
 )
-
-from src.camera.frame_broadcaster import (
-    FrameBroadcaster,
-)
-
-from src.fastapi.web_server import (
-    WebServer,
-)
-
-from src.safety.risk_engine import (
-    RiskEngine,
-)
-
-from src.zones.zone import (
-    ZoneManager,
-)
-
-from src.integration.connection import (
-    BackendClient,
-)
+from src.camera.frame_broadcaster import FrameBroadcaster
+from src.fastapi.web_server import WebServer
+from src.safety.risk_engine import RiskEngine
+from src.zones.zone import ZoneManager
+from src.integration.connection import BackendClient
 
 
-# ============================================================================
-# KEY CODES
-# ============================================================================
-
-# OpenCV reports Enter as 13 on Windows and 10 on some Linux builds.
 KEY_ENTER = (13, 10)
-
-# Escape key.
 KEY_ESC = 27
 
 
-# ============================================================================
-# FPS METER
-# ============================================================================
-
 class FpsMeter:
-    """
-    Rolling-average FPS meter.
-
-    A rolling average is used instead of calculating FPS from a single
-    frame because a single-frame calculation can jump significantly.
-    """
 
     def __init__(self, window=30):
+
         self._durations = collections.deque(
             maxlen=max(1, int(window))
         )
@@ -162,13 +88,11 @@ class FpsMeter:
         self._last_time = None
 
     def tick(self):
-        """
-        Register one processed frame.
-        """
 
         now = time.perf_counter()
 
         if self._last_time is not None:
+
             self._durations.append(
                 now - self._last_time
             )
@@ -177,9 +101,6 @@ class FpsMeter:
 
     @property
     def fps(self):
-        """
-        Return rolling-average FPS.
-        """
 
         if not self._durations:
             return 0.0
@@ -195,91 +116,36 @@ class FpsMeter:
         return 1.0 / average
 
 
-# ============================================================================
-# INCIDENT OFFENDER
-# ============================================================================
-
 def _incident_offender(incident):
-    """
-    Create a minimal person-like object from an open warning incident.
-
-    This is used when a worker responsible for a dwell violation is no longer
-    visible in the current frame.
-
-    Only fields required by the alarm/event pipeline are included.
-    """
 
     return {
         "id": incident.track_id,
-
         "person_id": incident.person_id,
-
         "zone": incident.zone_type,
-
         "zone_id": incident.zone_id,
-
         "hand_zone": None,
-
         "hand_zone_id": None,
-
         "hand_in_danger": False,
-
         "danger_duration": 0.0,
-
         "distance_to_danger": None,
     }
 
 
-# ============================================================================
-# APPLICATION
-# ============================================================================
-
 class ZoneXApp:
-    """
-    Main Zone X application.
-
-    This class is intentionally responsible for orchestration only.
-
-    Main processing pipeline:
-
-        frame
-          ↓
-        detection
-          ↓
-        tracking
-          ↓
-        zone evaluation
-          ↓
-        pose / hand detection
-          ↓
-        risk evaluation
-          ↓
-        event logging
-          ↓
-        alarm
-          ↓
-        rendering
-          ↓
-        OpenCV + Web Dashboard
-    """
-
-    # ------------------------------------------------------------------------
-    # INIT
-    # ------------------------------------------------------------------------
 
     def __init__(self, cfg):
 
         self.cfg = cfg
 
-        # --------------------------------------------------------------------
-        # Frame source
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # FRAME SOURCE
+        # ==============================================================
 
         self.source = None
 
-        # --------------------------------------------------------------------
-        # Web dashboard
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # WEB DASHBOARD
+        # ==============================================================
 
         self.frame_broadcaster = FrameBroadcaster(
             jpeg_quality=getattr(
@@ -291,154 +157,118 @@ class ZoneXApp:
 
         self.web_server = None
 
-        # --------------------------------------------------------------------
-        # Processing scheduler
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # PROCESSING
+        # ==============================================================
 
         self.schedule = ProcessingScheduler(None)
 
-        # --------------------------------------------------------------------
-        # Application state
-        # --------------------------------------------------------------------
-
         self.running = False
-
         self.paused = False
-
         self.frame_index = 0
 
-        # --------------------------------------------------------------------
-        # Latest frame/results
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # LATEST RESULTS
+        # ==============================================================
 
         self.last_frame = None
-
         self.people = []
-
         self.risks = {}
-
         self.worst_id = None
-
         self.worst = None
 
-        # --------------------------------------------------------------------
-        # Alert timing
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # ALERT TIMING
+        # ==============================================================
 
         self.last_violation_time = 0.0
-
         self.last_critical_time = 0.0
 
-        # --------------------------------------------------------------------
-        # Simulated machine state
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # MACHINE
+        # ==============================================================
 
         self.machine_on = bool(
             cfg.MACHINE_ON
         )
 
-        # --------------------------------------------------------------------
+        # ==============================================================
         # FPS
-        # --------------------------------------------------------------------
+        # ==============================================================
 
         self.fps_meter = FpsMeter(
             cfg.FPS_SMOOTHING_WINDOW
         )
 
-        # --------------------------------------------------------------------
-        # Console statistics
-        # --------------------------------------------------------------------
-
         self._last_stats_print = 0.0
 
-        # --------------------------------------------------------------------
-        # Zones
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # ZONES
+        # ==============================================================
 
         self.zones = ZoneManager(cfg)
 
-        # --------------------------------------------------------------------
-        # Tracker
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # TRACKER
+        # ==============================================================
 
         self.tracker = PersonTracker(
             enabled=cfg.ENABLE_TRACKING,
-
             max_distance=cfg.TRACK_MAX_DISTANCE,
-
             max_missing_frames=(
                 cfg.TRACK_MAX_MISSING_FRAMES
             ),
-
             zone_margin_px=cfg.ZONE_MARGIN_PX,
-
             enter_confirm_frames=(
                 cfg.ENTER_CONFIRM_FRAMES
             ),
-
             exit_confirm_frames=(
                 cfg.EXIT_CONFIRM_FRAMES
             ),
-
             hand_margin_px=cfg.HAND_MARGIN_PX,
-
             hand_enter_confirm_frames=(
                 cfg.HAND_ENTER_CONFIRM_FRAMES
             ),
-
             hand_exit_confirm_frames=(
                 cfg.HAND_EXIT_CONFIRM_FRAMES
             ),
         )
 
-        # --------------------------------------------------------------------
-        # Risk engine
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # RISK ENGINE
+        # ==============================================================
 
         self.risk_engine = RiskEngine(cfg)
 
-        # --------------------------------------------------------------------
-        # Event log
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # EVENTS
+        # ==============================================================
 
         self.events = EventLog(
             max_events=cfg.MAX_STORED_EVENTS,
-
             danger_time_threshold=(
                 cfg.DANGER_TIME_THRESHOLD_SEC
             ),
-
             critical_threshold=(
                 cfg.RISK_CRITICAL_THRESHOLD
             ),
-
-            # EventLog creates the event.
-            #
-            # _handle_event() only forwards it to the backend.
             on_event=self._handle_event,
-
             source_type=cfg.SOURCE_TYPE,
-
             schema_version=cfg.EVENT_SCHEMA_VERSION,
-
             log_risk_changes=cfg.LOG_RISK_CHANGES,
-
             log_root=cfg.LOG_ROOT,
-
             warning_dwell_threshold=(
                 cfg.WARNING_DWELL_THRESHOLD_SEC
             ),
-
             incident_dir=cfg.INCIDENT_DIR,
-
             save_incident_images=(
                 cfg.SAVE_INCIDENT_IMAGES
             ),
         )
 
-        # --------------------------------------------------------------------
-        # Spring Boot backend
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # SPRING BOOT
+        # ==============================================================
 
         self.backend = BackendClient(
             base_url=getattr(
@@ -448,65 +278,35 @@ class ZoneXApp:
             )
         )
 
-        # --------------------------------------------------------------------
-        # PC alarm
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # ALARM
+        # ==============================================================
 
         self.alarm = Alarm.from_config(cfg)
 
-        # --------------------------------------------------------------------
-        # Models
-        # --------------------------------------------------------------------
+        # ==============================================================
+        # MODELS
+        # ==============================================================
 
         self.detector = None
-
         self.pose = None
 
-    # ========================================================================
-    # BACKEND EVENT INTEGRATION
-    # ========================================================================
+    # ==================================================================
+    # EVENT
+    # ==================================================================
 
     def _handle_event(self, record):
-        """
-        Receive an already-created EventLog record.
-
-        EventLog remains responsible for:
-
-        - detecting events
-        - creating the event record
-        - writing JSON
-        - saving evidence images
-
-        This method only:
-
-        - prints the event
-        - forwards the event to Spring Boot
-
-        Backend failure never stops the CV safety pipeline.
-        """
-
-        # --------------------------------------------------------------------
-        # Console logging
-        # --------------------------------------------------------------------
 
         if self.cfg.LOG_EVENTS_TO_CONSOLE:
 
-            self._print_event(
-                record
-            )
-
-        # --------------------------------------------------------------------
-        # Backend integration
-        # --------------------------------------------------------------------
+            self._print_event(record)
 
         if self.backend is None:
             return
 
         try:
 
-            self.backend.send_incident(
-                record
-            )
+            self.backend.send_incident(record)
 
             print(
                 "[BACKEND] Event sent successfully: {}".format(
@@ -526,60 +326,32 @@ class ZoneXApp:
                 file=sys.stderr,
             )
 
-    # ========================================================================
+    # ==================================================================
     # SETUP
-    # ========================================================================
+    # ==================================================================
 
     def setup(self):
-        """
-        Initialize models, frame source, web server, logging and UI.
-        """
-
-        # --------------------------------------------------------------------
-        # Person detector
-        # --------------------------------------------------------------------
 
         self.detector = PersonDetector(
             model_path=self.cfg.MODEL_PATH,
-
             download_name=(
                 self.cfg.MODEL_DOWNLOAD_NAME
             ),
-
             confidence_threshold=(
                 self.cfg.CONFIDENCE_THRESHOLD
             ),
-
             iou_threshold=(
                 self.cfg.IOU_THRESHOLD
             ),
-
             person_class_id=(
                 self.cfg.PERSON_CLASS_ID
             ),
-
-            imgsz=(
-                self.cfg.INFERENCE_IMGSZ
-            ),
-
-            device=(
-                self.cfg.DEVICE
-            ),
-
-            verbose=(
-                self.cfg.VERBOSE_INFERENCE
-            ),
+            imgsz=self.cfg.INFERENCE_IMGSZ,
+            device=self.cfg.DEVICE,
+            verbose=self.cfg.VERBOSE_INFERENCE,
         )
 
-        # --------------------------------------------------------------------
-        # Pose model
-        # --------------------------------------------------------------------
-
         self._setup_pose()
-
-        # --------------------------------------------------------------------
-        # Frame source
-        # --------------------------------------------------------------------
 
         self.source = (
             FrameSource
@@ -587,32 +359,17 @@ class ZoneXApp:
             .open()
         )
 
-        # --------------------------------------------------------------------
-        # Processing scheduler
-        # --------------------------------------------------------------------
-
         self.schedule = ProcessingScheduler(
             self.cfg.TARGET_PROCESSING_FPS
             if self.source.uses_reader_thread
             else None
         )
 
-        # --------------------------------------------------------------------
-        # Web dashboard
-        # --------------------------------------------------------------------
-
         self._setup_web_server()
-
-        # --------------------------------------------------------------------
-        # Logging session
-        # --------------------------------------------------------------------
 
         self._open_log_session()
 
-        # --------------------------------------------------------------------
-        # OpenCV window
-        # --------------------------------------------------------------------
-
+        # Keep the OpenCV window for local debugging.
         cv2.namedWindow(
             self.cfg.WINDOW_NAME,
             cv2.WINDOW_NORMAL,
@@ -628,10 +385,6 @@ class ZoneXApp:
             self.cfg.WINDOW_NAME,
             self.zones.handle_mouse,
         )
-
-        # --------------------------------------------------------------------
-        # Startup messages
-        # --------------------------------------------------------------------
 
         if self.schedule.enabled:
 
@@ -652,18 +405,11 @@ class ZoneXApp:
 
         print_controls()
 
-    # ========================================================================
+    # ==================================================================
     # WEB SERVER
-    # ========================================================================
+    # ==================================================================
 
     def _setup_web_server(self):
-        """
-        Start the FastAPI dashboard server.
-
-        The WebServer receives frames from FrameBroadcaster.
-
-        main.py never handles HTTP directly.
-        """
 
         enabled = getattr(
             self.cfg,
@@ -695,9 +441,9 @@ class ZoneXApp:
 
         self.web_server = WebServer(
             broadcaster=self.frame_broadcaster,
-
+            zone_manager=self.zones,
+            command_handler=self._handle_web_command,
             host=host,
-
             port=port,
         )
 
@@ -705,19 +451,531 @@ class ZoneXApp:
 
         print(
             "[ZONE X] Web dashboard started: "
-            "http://localhost:{}".format(
-                port
-            )
+            "http://localhost:{}".format(port)
         )
 
-    # ========================================================================
+    # ==================================================================
+    # WEB COMMANDS
+    # ==================================================================
+
+    def _handle_web_command(self, command, **kwargs):
+        """
+        Handle commands coming from the React dashboard.
+
+        IMPORTANT:
+
+        React does not create a second zone system.
+
+        Every command is routed into the SAME ZoneManager and state
+        used by the OpenCV window.
+        """
+
+        # --------------------------------------------------------------
+        # KEYBOARD
+        # --------------------------------------------------------------
+
+        if command == "key":
+
+            key = (
+                kwargs.get("key", "")
+                .strip()
+                .lower()
+            )
+
+            key_map = {
+                "s": ord("s"),
+                "w": ord("w"),
+                "d": ord("d"),
+                "r": ord("r"),
+                "c": ord("c"),
+                "m": ord("m"),
+                "p": ord("p"),
+                "q": ord("q"),
+                "escape": KEY_ESC,
+                "esc": KEY_ESC,
+                "enter": 13,
+                "return": 13,
+            }
+
+            if key not in key_map:
+
+                return {
+                    "handled": False,
+                    "message": "Unknown key: {}".format(
+                        key
+                    ),
+                }
+
+            keep_running = self._apply_control_key(
+                key_map[key]
+            )
+
+            return {
+                "handled": True,
+                "keep_running": keep_running,
+                "message": self.zones.last_message,
+            }
+
+        # --------------------------------------------------------------
+        # START ZONE
+        # --------------------------------------------------------------
+
+        if command == "start_zone":
+
+            zone_type = (
+                kwargs.get(
+                    "zone_type",
+                    "",
+                )
+                .strip()
+                .upper()
+            )
+
+            if zone_type not in self.zones.zone_types:
+
+                return {
+                    "handled": False,
+                    "message": "Unknown zone type",
+                }
+
+            self.zones.start_definition(
+                zone_type
+            )
+
+            self._forget_zone_state()
+
+            self.paused = False
+
+            return {
+                "handled": True,
+                "zone_type": zone_type,
+                "zone_id": self.zones.defining_id,
+                "message": self.zones.last_message,
+            }
+
+        # --------------------------------------------------------------
+        # ADD POINT
+        # --------------------------------------------------------------
+
+        if command == "zone_point":
+
+            x = int(
+                round(
+                    float(
+                        kwargs.get(
+                            "x",
+                            0,
+                        )
+                    )
+                )
+            )
+
+            y = int(
+                round(
+                    float(
+                        kwargs.get(
+                            "y",
+                            0,
+                        )
+                    )
+                )
+            )
+
+            self.zones.handle_mouse(
+                cv2.EVENT_LBUTTONDOWN,
+                x,
+                y,
+                0,
+                None,
+            )
+
+            return {
+                "handled": True,
+                "message": self.zones.last_message,
+            }
+
+        # --------------------------------------------------------------
+        # HOVER
+        # --------------------------------------------------------------
+
+        if command == "zone_hover":
+
+            x = int(
+                round(
+                    float(
+                        kwargs.get(
+                            "x",
+                            0,
+                        )
+                    )
+                )
+            )
+
+            y = int(
+                round(
+                    float(
+                        kwargs.get(
+                            "y",
+                            0,
+                        )
+                    )
+                )
+            )
+
+            self.zones.handle_mouse(
+                cv2.EVENT_MOUSEMOVE,
+                x,
+                y,
+                0,
+                None,
+            )
+
+            return {
+                "handled": True,
+                "message": self.zones.last_message,
+            }
+
+        # --------------------------------------------------------------
+        # UNDO
+        # --------------------------------------------------------------
+
+        if command == "zone_undo":
+
+            self.zones.handle_mouse(
+                cv2.EVENT_RBUTTONDOWN,
+                0,
+                0,
+                0,
+                None,
+            )
+
+            return {
+                "handled": True,
+                "message": self.zones.last_message,
+            }
+
+        # --------------------------------------------------------------
+        # FINISH
+        # --------------------------------------------------------------
+
+        if command == "zone_finish":
+
+            ok, _ = (
+                self.zones.finish_definition()
+            )
+
+            if ok:
+
+                zone = self.zones.last_finished
+
+                self._forget_zone_state()
+
+                return {
+                    "handled": True,
+                    "success": True,
+                    "zone_id": (
+                        zone.zone_id
+                        if zone
+                        else None
+                    ),
+                    "zone_type": (
+                        zone.zone_type
+                        if zone
+                        else None
+                    ),
+                    "message": (
+                        zone.last_message
+                        if zone
+                        else ""
+                    ),
+                }
+
+            return {
+                "handled": True,
+                "success": False,
+                "message": self.zones.last_message,
+            }
+
+        # --------------------------------------------------------------
+        # CANCEL
+        # --------------------------------------------------------------
+
+        if command == "zone_cancel":
+
+            if self.zones.is_defining:
+
+                zone_type = (
+                    self.zones.cancel_definition()
+                )
+
+                self._forget_zone_state()
+
+                return {
+                    "handled": True,
+                    "cancelled": True,
+                    "zone_type": zone_type,
+                    "message": self.zones.last_message,
+                }
+
+            return {
+                "handled": True,
+                "cancelled": False,
+                "message": "No zone is being defined.",
+            }
+
+        # --------------------------------------------------------------
+        # CLEAR
+        # --------------------------------------------------------------
+
+        if command == "clear":
+
+            if self.zones.is_defining:
+
+                self.zones.cancel_definition()
+
+            else:
+
+                self.zones.clear()
+
+            self._forget_zone_state()
+
+            return {
+                "handled": True,
+                "message": self.zones.last_message,
+            }
+
+        return {
+            "handled": False,
+            "message": (
+                "Unknown command: {}".format(
+                    command
+                )
+            ),
+        }
+
+    # ==================================================================
+    # APPLY OPEN-CV CONTROL KEY
+    # ==================================================================
+
+    def _apply_control_key(self, key):
+        """
+        The single implementation of keyboard behaviour.
+
+        Both:
+
+            OpenCV keyboard
+            React keyboard
+
+        reach this same function.
+        """
+
+        cfg = self.cfg
+
+        # ==============================================================
+        # QUIT
+        # ==============================================================
+
+        if key in (
+            ord("q"),
+            ord("Q"),
+            KEY_ESC,
+        ):
+
+            print(
+                "[ZONE X] Quit requested."
+            )
+
+            self.running = False
+
+            return False
+
+        # ==============================================================
+        # ZONE START
+        # ==============================================================
+
+        zone_keys = {
+
+            ord("s"): cfg.ZONE_SAFE,
+            ord("S"): cfg.ZONE_SAFE,
+
+            ord("w"): cfg.ZONE_WARNING,
+            ord("W"): cfg.ZONE_WARNING,
+
+            ord("d"): cfg.ZONE_DANGER,
+            ord("D"): cfg.ZONE_DANGER,
+
+            ord("r"): cfg.ZONE_DANGER,
+            ord("R"): cfg.ZONE_DANGER,
+        }
+
+        if key in zone_keys:
+
+            zone_type = zone_keys[key]
+
+            self.zones.start_definition(
+                zone_type
+            )
+
+            self._forget_zone_state()
+
+            self.paused = False
+
+            print(
+                "[ZONE X] Defining {}: "
+                "click points, Enter to finish.".format(
+                    self.zones.defining_id
+                    or cfg.ZONE_LABELS[
+                        zone_type
+                    ]
+                )
+            )
+
+            return True
+
+        # ==============================================================
+        # CLEAR / CANCEL
+        # ==============================================================
+
+        if key in (
+            ord("c"),
+            ord("C"),
+        ):
+
+            if self.zones.is_defining:
+
+                zone_type = (
+                    self.zones.cancel_definition()
+                )
+
+                print(
+                    "[ZONE X] Cancelled {}.".format(
+                        cfg.ZONE_LABELS[
+                            zone_type
+                        ]
+                    )
+                )
+
+            else:
+
+                self.zones.clear()
+
+                print(
+                    "[ZONE X] All zones cleared."
+                )
+
+            self._forget_zone_state()
+
+            return True
+
+        # ==============================================================
+        # MACHINE
+        # ==============================================================
+
+        if key in (
+            ord("m"),
+            ord("M"),
+        ):
+
+            self.machine_on = (
+                not self.machine_on
+            )
+
+            self.zones.last_message = (
+                "Machine {}.".format(
+                    "ON"
+                    if self.machine_on
+                    else "OFF"
+                )
+            )
+
+            print(
+                "[ZONE X] Machine {}.".format(
+                    "ON"
+                    if self.machine_on
+                    else "OFF"
+                )
+            )
+
+            return True
+
+        # ==============================================================
+        # PAUSE
+        # ==============================================================
+
+        if key in (
+            ord("p"),
+            ord("P"),
+        ):
+
+            if self.zones.is_defining:
+
+                self.zones.last_message = (
+                    "Finish or cancel the "
+                    "zone before pausing."
+                )
+
+            else:
+
+                self.paused = (
+                    not self.paused
+                )
+
+                print(
+                    "[ZONE X] {}.".format(
+                        "Paused."
+                        if self.paused
+                        else "Resumed."
+                    )
+                )
+
+            return True
+
+        # ==============================================================
+        # ENTER
+        # ==============================================================
+
+        if key in KEY_ENTER:
+
+            if self.zones.is_defining:
+
+                ok, _ = (
+                    self.zones.finish_definition()
+                )
+
+                if ok:
+
+                    zone = (
+                        self.zones.last_finished
+                    )
+
+                    self._forget_zone_state()
+
+                    print(
+                        "[ZONE X] {} set with "
+                        "{} points (area {:.0f} px^2).".format(
+                            zone.zone_id,
+                            zone.point_count,
+                            zone.area,
+                        )
+                    )
+
+                else:
+
+                    print(
+                        "[ZONE X] {}".format(
+                            self.zones.last_message
+                        )
+                    )
+
+            return True
+
+        return True
+
+    # ==================================================================
     # POSE
-    # ========================================================================
+    # ==================================================================
 
     def _setup_pose(self):
-        """
-        Load pose model for wrist/reach-in detection.
-        """
 
         if not self.cfg.ENABLE_POSE:
 
@@ -732,9 +990,7 @@ class ZoneXApp:
 
             return
 
-        from src.pose.pose_detector import (
-            WristDetector,
-        )
+        from src.pose.pose_detector import WristDetector
 
         try:
 
@@ -742,31 +998,24 @@ class ZoneXApp:
                 model_path=(
                     self.cfg.POSE_MODEL_PATH
                 ),
-
                 download_name=(
                     self.cfg.POSE_MODEL_DOWNLOAD_NAME
                 ),
-
                 confidence_threshold=(
                     self.cfg.POSE_CONFIDENCE_THRESHOLD
                 ),
-
                 keypoint_confidence=(
                     self.cfg.POSE_KEYPOINT_CONFIDENCE
                 ),
-
                 wrist_ids=(
                     self.cfg.WRIST_KEYPOINT_IDS
                 ),
-
                 imgsz=(
                     self.cfg.POSE_IMGSZ
                 ),
-
                 device=(
                     self.cfg.DEVICE
                 ),
-
                 verbose=(
                     self.cfg.VERBOSE_INFERENCE
                 ),
@@ -794,40 +1043,32 @@ class ZoneXApp:
                 file=sys.stderr,
             )
 
-    # ========================================================================
+    # ==================================================================
     # LOG SESSION
-    # ========================================================================
+    # ==================================================================
 
     def _open_log_session(self):
-        """
-        Start a fresh logs/<timestamp>/ directory.
-        """
 
         if not self.cfg.ENABLE_JSON_LOGGING:
             return
 
         events_path = self.events.open_session(
             log_root=self.cfg.LOG_ROOT,
-
             metadata={
                 "source_type": (
                     self.source.source_type
                 ),
-
                 "frame_width": (
                     self.source.frame_width
                 ),
-
                 "frame_height": (
                     self.source.frame_height
                 ),
-
                 "model": (
                     os.path.basename(
                         self.cfg.MODEL_PATH
                     )
                 ),
-
                 "pose_model": (
                     os.path.basename(
                         self.cfg.POSE_MODEL_PATH
@@ -835,15 +1076,12 @@ class ZoneXApp:
                     if self.pose is not None
                     else None
                 ),
-
                 "machine_on_at_start": (
                     self.machine_on
                 ),
-
                 "danger_time_threshold_sec": (
                     self.cfg.DANGER_TIME_THRESHOLD_SEC
                 ),
-
                 "zone_priority": (
                     list(
                         self.cfg.ZONE_PRIORITY
@@ -860,18 +1098,11 @@ class ZoneXApp:
                 )
             )
 
-    # ========================================================================
+    # ==================================================================
     # CLEANUP
-    # ========================================================================
+    # ==================================================================
 
     def cleanup(self):
-        """
-        Release every resource safely.
-        """
-
-        # --------------------------------------------------------------------
-        # Stop alarm first
-        # --------------------------------------------------------------------
 
         try:
 
@@ -885,10 +1116,6 @@ class ZoneXApp:
                 ),
                 file=sys.stderr,
             )
-
-        # --------------------------------------------------------------------
-        # Stop web server
-        # --------------------------------------------------------------------
 
         if self.web_server is not None:
 
@@ -909,10 +1136,6 @@ class ZoneXApp:
 
                 self.web_server = None
 
-        # --------------------------------------------------------------------
-        # Close EventLog session
-        # --------------------------------------------------------------------
-
         try:
 
             self.events.close_session()
@@ -925,10 +1148,6 @@ class ZoneXApp:
                 ),
                 file=sys.stderr,
             )
-
-        # --------------------------------------------------------------------
-        # Release frame source
-        # --------------------------------------------------------------------
 
         if self.source is not None:
 
@@ -949,28 +1168,23 @@ class ZoneXApp:
 
                 self.source = None
 
-        # --------------------------------------------------------------------
-        # OpenCV cleanup
-        # --------------------------------------------------------------------
-
         try:
 
             cv2.destroyAllWindows()
 
             for _ in range(3):
+
                 cv2.waitKey(1)
 
         except cv2.error:
+
             pass
 
-    # ========================================================================
+    # ==================================================================
     # MAIN LOOP
-    # ========================================================================
+    # ==================================================================
 
     def run(self):
-        """
-        Run the real-time processing loop.
-        """
 
         self.running = True
 
@@ -978,23 +1192,11 @@ class ZoneXApp:
 
         while self.running:
 
-            # =================================================================
-            # ACTIVE
-            # =================================================================
-
             if not self.paused:
-
-                # -------------------------------------------------------------
-                # Should we process another frame?
-                # -------------------------------------------------------------
 
                 if self.schedule.due():
 
                     ok, frame = self.source.read()
-
-                    # =========================================================
-                    # VALID FRAME
-                    # =========================================================
 
                     if ok:
 
@@ -1002,56 +1204,29 @@ class ZoneXApp:
 
                         empty_frame_count = 0
 
-                        started = (
-                            time.perf_counter()
-                        )
-
-                        # -----------------------------------------------------
-                        # Complete CV pipeline
-                        # -----------------------------------------------------
+                        started = time.perf_counter()
 
                         self.process_frame(
                             frame
                         )
-
-                        # -----------------------------------------------------
-                        # Processing statistics
-                        # -----------------------------------------------------
 
                         self.source.stats.note_process_time(
                             time.perf_counter()
                             - started
                         )
 
-                        # -----------------------------------------------------
-                        # Keep latest raw frame
-                        # -----------------------------------------------------
-
                         self.last_frame = frame
 
-                        # -----------------------------------------------------
-                        # FPS
-                        # -----------------------------------------------------
-
                         self.fps_meter.tick()
-
-                    # =========================================================
-                    # SOURCE FINISHED
-                    # =========================================================
 
                     elif self._source_finished():
 
                         break
 
-                    # =========================================================
-                    # NO FRAME
-                    # =========================================================
-
                     elif (
                         self._handle_no_frame(
                             empty_frame_count
-                        )
-                        is False
+                        ) is False
                     ):
 
                         break
@@ -1064,48 +1239,34 @@ class ZoneXApp:
 
                     self._idle()
 
-            # =================================================================
-            # PAUSED
-            # =================================================================
-
             else:
 
                 if self.last_frame is not None:
 
-                    frame = (
-                        self.last_frame.copy()
-                    )
+                    frame = self.last_frame.copy()
 
                     self.render(frame)
-
-                    # ---------------------------------------------------------
-                    # Show paused frame locally
-                    # ---------------------------------------------------------
 
                     cv2.imshow(
                         self.cfg.WINDOW_NAME,
                         frame,
                     )
 
-                    # ---------------------------------------------------------
-                    # Also publish paused frame to dashboard
-                    # ---------------------------------------------------------
-
                     self._publish_frame(
                         frame
                     )
 
-            # =================================================================
-            # KEYBOARD
-            # =================================================================
+            # ----------------------------------------------------------
+            # OpenCV keyboard
+            # ----------------------------------------------------------
 
             if self._handle_keys() is False:
 
                 break
 
-            # =================================================================
-            # WINDOW CLOSED
-            # =================================================================
+            # ----------------------------------------------------------
+            # OpenCV window close
+            # ----------------------------------------------------------
 
             if self._window_closed():
 
@@ -1115,17 +1276,13 @@ class ZoneXApp:
 
                 break
 
-            # =================================================================
-            # STATS
-            # =================================================================
-
             self._maybe_print_stats()
 
         self.running = False
 
-    # ========================================================================
+    # ==================================================================
     # SOURCE
-    # ========================================================================
+    # ==================================================================
 
     def _source_finished(self):
 
@@ -1143,13 +1300,6 @@ class ZoneXApp:
         self,
         empty_frame_count,
     ):
-        """
-        Handle temporary frame loss or stream failure.
-        """
-
-        # --------------------------------------------------------------------
-        # Reader-thread source
-        # --------------------------------------------------------------------
 
         if self.source.uses_reader_thread:
 
@@ -1183,10 +1333,6 @@ class ZoneXApp:
 
             return True
 
-        # --------------------------------------------------------------------
-        # Normal source
-        # --------------------------------------------------------------------
-
         if (
             empty_frame_count + 1
             >= self.cfg.MAX_EMPTY_FRAMES
@@ -1204,9 +1350,9 @@ class ZoneXApp:
 
         return True
 
-    # ========================================================================
+    # ==================================================================
     # IDLE
-    # ========================================================================
+    # ==================================================================
 
     def _idle(self):
 
@@ -1223,9 +1369,9 @@ class ZoneXApp:
                 )
             )
 
-    # ========================================================================
-    # STATISTICS
-    # ========================================================================
+    # ==================================================================
+    # STATS
+    # ==================================================================
 
     def _maybe_print_stats(self):
 
@@ -1254,40 +1400,13 @@ class ZoneXApp:
             self.source.stats.console_line()
         )
 
-    # ========================================================================
+    # ==================================================================
     # FRAME PROCESSING
-    # ========================================================================
+    # ==================================================================
 
     def process_frame(self, frame):
-        """
-        Run the complete Zone X safety pipeline.
-
-        Pipeline:
-
-            frame
-              ↓
-            detector
-              ↓
-            tracker
-              ↓
-            pose
-              ↓
-            risk engine
-              ↓
-            EventLog
-              ↓
-            alarm
-              ↓
-            render
-              ↓
-            OpenCV + Web
-        """
 
         cfg = self.cfg
-
-        # --------------------------------------------------------------------
-        # Frame dimensions
-        # --------------------------------------------------------------------
 
         height, width = frame.shape[:2]
 
@@ -1298,34 +1417,34 @@ class ZoneXApp:
 
         self.frame_index += 1
 
-        # ====================================================================
-        # 1. PERSON DETECTION
-        # ====================================================================
+        # ==============================================================
+        # DETECTION
+        # ==============================================================
 
         detections = self.detector.detect(
             frame
         )
 
-        # ====================================================================
-        # 2. TRACKING
-        # ====================================================================
+        # ==============================================================
+        # TRACKING
+        # ==============================================================
 
         self.people = self.tracker.update(
             detections,
             self.zones,
         )
 
-        # ====================================================================
-        # 3. POSE / HAND STATE
-        # ====================================================================
+        # ==============================================================
+        # POSE
+        # ==============================================================
 
         self._update_hand_state(
             frame
         )
 
-        # ====================================================================
-        # 4. RISK ENGINE
-        # ====================================================================
+        # ==============================================================
+        # RISK
+        # ==============================================================
 
         self.risks = {
             person["id"]:
@@ -1333,67 +1452,40 @@ class ZoneXApp:
                     person,
                     self.machine_on,
                 )
-
             for person in self.people
         }
 
-        # ====================================================================
-        # 5. FIND HIGHEST RISK
-        # ====================================================================
+        self.worst_id, self.worst = (
+            self._worst_risk()
+        )
 
-        (
-            self.worst_id,
-            self.worst,
-        ) = self._worst_risk()
-
-        # ====================================================================
-        # 6. EVENT LOG
-        # ====================================================================
-        #
-        # IMPORTANT:
-        #
-        # Do not duplicate event creation here.
-        #
-        # EventLog remains responsible for:
-        #
-        #   - event detection
-        #   - event JSON
-        #   - incident image
-        #   - EventLog callback
-        #
-        # _handle_event() forwards the event to Spring Boot.
-        #
-        # ====================================================================
+        # ==============================================================
+        # EVENT LOG
+        # ==============================================================
 
         self.events.update(
             self.people,
-
             self.risks,
-
             self.machine_on,
-
             cfg,
-
             live_ids=(
                 self.tracker.live_ids
             ),
-
             frame=frame,
         )
 
-        # ====================================================================
-        # 7. ALARM
-        # ====================================================================
+        # ==============================================================
+        # ALARM
+        # ==============================================================
 
         self._update_alarm()
 
-        # ====================================================================
-        # 8. ALERT TIMING
-        # ====================================================================
+        # ==============================================================
+        # ALERT TIMING
+        # ==============================================================
 
         now = time.time()
 
-        # Any danger zone or hand-danger state.
         if any(
             person["zone"]
             == cfg.ZONE_DANGER
@@ -1403,7 +1495,6 @@ class ZoneXApp:
 
             self.last_violation_time = now
 
-        # Critical risk.
         if (
             self.worst is not None
             and self.risk_engine.is_critical(
@@ -1413,63 +1504,34 @@ class ZoneXApp:
 
             self.last_critical_time = now
 
-        # ====================================================================
-        # 9. RENDER
-        # ====================================================================
+        # ==============================================================
+        # FINAL RENDER
+        # ==============================================================
 
-        self.render(
-            frame
-        )
+        self.render(frame)
 
-        # ====================================================================
-        # 10. LOCAL OPENCV DISPLAY
-        # ====================================================================
+        # ==============================================================
+        # LOCAL OPENCV WINDOW
+        # ==============================================================
 
         cv2.imshow(
             self.cfg.WINDOW_NAME,
             frame,
         )
 
-        # ====================================================================
-        # 11. WEB DASHBOARD
-        # ====================================================================
-        #
-        # IMPORTANT:
-        #
-        # The dashboard receives the FINAL annotated frame.
-        #
-        # Therefore the web dashboard shows:
-        #
-        #   - people
-        #   - IDs
-        #   - zones
-        #   - risk
-        #   - alerts
-        #   - HUD
-        #   - worker cards
-        #   - danger borders
-        #   - hand alerts
-        #
-        # exactly like the OpenCV window.
-        #
-        # ====================================================================
+        # ==============================================================
+        # WEB DASHBOARD
+        # ==============================================================
 
         self._publish_frame(
             frame
         )
 
-    # ========================================================================
+    # ==================================================================
     # WEB FRAME PUBLISH
-    # ========================================================================
+    # ==================================================================
 
     def _publish_frame(self, frame):
-        """
-        Publish the final annotated frame to the web dashboard.
-
-        FrameBroadcaster is deliberately isolated from the CV pipeline.
-
-        If web streaming fails, the local CV application continues.
-        """
 
         if self.web_server is None:
 
@@ -1490,17 +1552,11 @@ class ZoneXApp:
                 file=sys.stderr,
             )
 
-    # ========================================================================
+    # ==================================================================
     # HAND STATE
-    # ========================================================================
+    # ==================================================================
 
     def _update_hand_state(self, frame):
-        """
-        Run pose detection periodically.
-
-        Pose detection is intentionally not performed on every frame if
-        POSE_EVERY_N_FRAMES is greater than 1.
-        """
 
         if (
             self.pose is None
@@ -1527,41 +1583,25 @@ class ZoneXApp:
             associate_wrists,
         )
 
-        # --------------------------------------------------------------------
-        # Pose detection
-        # --------------------------------------------------------------------
-
         poses = self.pose.detect(
             frame
         )
 
-        # --------------------------------------------------------------------
-        # Match wrists to tracked people
-        # --------------------------------------------------------------------
-
         wrist_map = associate_wrists(
             self.people,
-
             poses,
-
             self.cfg.POSE_MATCH_MIN_IOU,
         )
 
-        # --------------------------------------------------------------------
-        # Update tracker hand state
-        # --------------------------------------------------------------------
-
         self.tracker.update_hands(
             self.people,
-
             wrist_map,
-
             self.zones,
         )
 
-    # ========================================================================
-    # CRITICAL STATE
-    # ========================================================================
+    # ==================================================================
+    # CRITICAL
+    # ==================================================================
 
     def _is_critical(self, person):
 
@@ -1575,17 +1615,14 @@ class ZoneXApp:
             )
         )
 
-    # ========================================================================
+    # ==================================================================
     # ALARM OFFENDERS
-    # ========================================================================
+    # ==================================================================
 
     def _alarm_offenders(
         self,
         dwelling,
     ):
-        """
-        Return all workers that should currently trigger the alarm.
-        """
 
         offenders = [
             person
@@ -1600,16 +1637,9 @@ class ZoneXApp:
             for person in offenders
         }
 
-        # --------------------------------------------------------------------
-        # Add workers responsible for warning dwell violations
-        # --------------------------------------------------------------------
-
         for incident in dwelling:
 
-            if (
-                incident.track_id
-                in claimed
-            ):
+            if incident.track_id in claimed:
 
                 continue
 
@@ -1637,22 +1667,15 @@ class ZoneXApp:
 
         return offenders
 
-    # ========================================================================
+    # ==================================================================
     # ALARM
-    # ========================================================================
+    # ==================================================================
 
     def _update_alarm(self):
-        """
-        Update PC alarm and alarm-related EventLog state.
-        """
 
         if not self.cfg.ENABLE_PC_ALARM:
 
             return
-
-        # --------------------------------------------------------------------
-        # Warning dwell violations
-        # --------------------------------------------------------------------
 
         dwelling = (
             self.events.warning_dwell_violations(
@@ -1660,19 +1683,11 @@ class ZoneXApp:
             )
         )
 
-        # --------------------------------------------------------------------
-        # Determine offenders
-        # --------------------------------------------------------------------
-
         offenders = (
             self._alarm_offenders(
                 dwelling
             )
         )
-
-        # --------------------------------------------------------------------
-        # Start/stop alarm
-        # --------------------------------------------------------------------
 
         if offenders:
 
@@ -1682,35 +1697,23 @@ class ZoneXApp:
 
             self.alarm.stop_alarm()
 
-        # --------------------------------------------------------------------
-        # Mark alarm-triggered incidents
-        # --------------------------------------------------------------------
-
         if self.alarm.is_alarm_active():
 
             for incident in dwelling:
 
                 incident.alarm_triggered = True
 
-        # --------------------------------------------------------------------
-        # Notify EventLog
-        # --------------------------------------------------------------------
-
         self.events.update_alarm(
             self.alarm.is_alarm_active(),
-
             offenders,
-
             self.risks,
-
             self.machine_on,
-
             self.cfg,
         )
 
-    # ========================================================================
-    # PERSON LOOKUP
-    # ========================================================================
+    # ==================================================================
+    # PERSON
+    # ==================================================================
 
     def _person(self, track_id):
 
@@ -1726,9 +1729,9 @@ class ZoneXApp:
 
         return None
 
-    # ========================================================================
+    # ==================================================================
     # WORST RISK
-    # ========================================================================
+    # ==================================================================
 
     def _worst_risk(self):
 
@@ -1765,9 +1768,9 @@ class ZoneXApp:
 
         return self.worst["risk"]
 
-    # ========================================================================
+    # ==================================================================
     # ZONE COUNTS
-    # ========================================================================
+    # ==================================================================
 
     def _zone_counts(self):
 
@@ -1789,32 +1792,17 @@ class ZoneXApp:
 
         return counts
 
-    # ========================================================================
+    # ==================================================================
     # RENDER
-    # ========================================================================
+    # ==================================================================
 
     def render(self, frame):
-        """
-        Draw all Zone X visual information onto the frame.
-        """
 
         cfg = self.cfg
 
-        # --------------------------------------------------------------------
-        # Zone counts
-        # --------------------------------------------------------------------
-
         counts = self._zone_counts()
 
-        # --------------------------------------------------------------------
-        # Current time
-        # --------------------------------------------------------------------
-
         now = time.time()
-
-        # --------------------------------------------------------------------
-        # Alert state
-        # --------------------------------------------------------------------
 
         alert_active = (
             self.zones.any_ready
@@ -1834,17 +1822,9 @@ class ZoneXApp:
             <= cfg.ALERT_HOLD_SECONDS
         )
 
-        # --------------------------------------------------------------------
-        # Violated zone IDs
-        # --------------------------------------------------------------------
-
         violated_ids = set()
 
         for person in self.people:
-
-            # ---------------------------------------------------------------
-            # Worker inside warning/danger zone
-            # ---------------------------------------------------------------
 
             if person.get(
                 "zone"
@@ -1861,10 +1841,6 @@ class ZoneXApp:
                         person["zone_id"]
                     )
 
-            # ---------------------------------------------------------------
-            # Hand inside danger zone
-            # ---------------------------------------------------------------
-
             if (
                 person.get(
                     "hand_in_danger"
@@ -1878,51 +1854,29 @@ class ZoneXApp:
                     person["hand_zone_id"]
                 )
 
-        # ====================================================================
-        # ZONES
-        # ====================================================================
-
         self.zones.draw(
             frame,
-
             violated_ids=(
                 violated_ids
             ),
         )
 
-        # ====================================================================
-        # PEOPLE
-        # ====================================================================
-
         ui.draw_people(
             frame,
-
             self.people,
-
             cfg,
         )
 
-        # ====================================================================
-        # STATUS
-        # ====================================================================
-
         status = self._current_status(
             alert_active,
-
             critical_active,
         )
-
-        # ====================================================================
-        # ALERT BORDER
-        # ====================================================================
 
         if status == "CRITICAL":
 
             ui.draw_alert_border(
                 frame,
-
                 cfg,
-
                 cfg.CRITICAL_BANNER_TEXT,
             )
 
@@ -1930,66 +1884,42 @@ class ZoneXApp:
 
             ui.draw_alert_border(
                 frame,
-
                 cfg,
-
                 cfg.ALERT_TEXT,
             )
 
-        # ====================================================================
-        # HAND ALERT
-        # ====================================================================
-
         ui.draw_hand_alert(
             frame,
-
             cfg,
-
             self.people,
         )
 
-        # ====================================================================
-        # HUD
-        # ====================================================================
-
         ui.draw_hud(
             frame,
-
             cfg,
-
             people_count=len(
                 self.people
             ),
-
             inside_count=counts.get(
                 cfg.ZONE_DANGER,
                 0,
             ),
-
             fps=self.fps_meter.fps,
-
             status=status,
-
             zone_info=(
                 self.zones.summary()
             ),
-
             paused=self.paused,
-
             machine_on=self.machine_on,
-
             zone_counts=counts,
-
             banner_text=(
                 self._banner_override(
                     status
                 )
             ),
-
             highest_risk=(
                 self.highest_risk
             ),
-
             critical=(
                 self.risk_engine.is_critical(
                     self.highest_risk
@@ -1997,25 +1927,14 @@ class ZoneXApp:
             ),
         )
 
-        # ====================================================================
-        # WORKER PANEL
-        # ====================================================================
-
         if cfg.SHOW_WORKER_PANEL:
 
             ui.draw_worker_panel(
                 frame,
-
                 cfg,
-
                 self.people,
-
                 self.risks,
             )
-
-        # ====================================================================
-        # REASON PANEL
-        # ====================================================================
 
         if (
             cfg.SHOW_REASON_PANEL
@@ -2025,31 +1944,18 @@ class ZoneXApp:
 
             ui.draw_reason_panel(
                 frame,
-
                 cfg,
-
                 self.worst,
-
                 self._person(
                     self.worst_id
                 ),
             )
 
-        # ====================================================================
-        # ZONE MESSAGE
-        # ====================================================================
-
         ui.draw_zone_message(
             frame,
-
             cfg,
-
             self.zones.last_message,
         )
-
-        # ====================================================================
-        # SOURCE STATS
-        # ====================================================================
 
         if getattr(
             cfg,
@@ -2059,64 +1965,42 @@ class ZoneXApp:
 
             ui.draw_source_stats(
                 frame,
-
                 cfg,
-
                 self.source.stats,
             )
-
-        # ====================================================================
-        # HELP BAR
-        # ====================================================================
 
         if cfg.SHOW_HELP_BAR:
 
             ui.draw_help_bar(
                 frame,
-
                 cfg,
-
                 defining=(
                     self.zones.is_defining
                 ),
             )
 
-        # ====================================================================
-        # PERSON CARDS
-        # ====================================================================
-
         ui.draw_person_cards(
             frame,
-
             self.people,
-
             cfg,
-
             self.risks,
         )
-
-        # ====================================================================
-        # PAUSED MESSAGE
-        # ====================================================================
 
         if self.paused:
 
             ui.draw_center_message(
                 frame,
-
                 cfg,
-
                 [
                     "PAUSED",
                     "press P to resume",
                 ],
-
                 cfg.COLOR_ACCENT,
             )
 
-    # ========================================================================
-    # CURRENT STATUS
-    # ========================================================================
+    # ==================================================================
+    # STATUS
+    # ==================================================================
 
     def _current_status(
         self,
@@ -2156,9 +2040,9 @@ class ZoneXApp:
 
         return "CLEAR"
 
-    # ========================================================================
+    # ==================================================================
     # BANNER
-    # ========================================================================
+    # ==================================================================
 
     def _banner_override(
         self,
@@ -2183,15 +2067,12 @@ class ZoneXApp:
             .format(label)
         )
 
-    # ========================================================================
-    # EVENT PRINTER
-    # ========================================================================
+    # ==================================================================
+    # EVENT PRINT
+    # ==================================================================
 
     @staticmethod
     def _print_event(record):
-        """
-        Print a compact event line.
-        """
 
         who = (
             record.get(
@@ -2230,7 +2111,6 @@ class ZoneXApp:
 
             score = "{:.1f}s{}".format(
                 duration,
-
                 (
                     "  ALARM"
                     if record.get(
@@ -2253,23 +2133,19 @@ class ZoneXApp:
         print(
             "[Event] {}  {}  {}{}{}".format(
                 stamp,
-
                 record.get(
                     "event_type",
                     "UNKNOWN",
                 ),
-
                 who,
-
                 where,
-
                 score,
             )
         )
 
-    # ========================================================================
+    # ==================================================================
     # WINDOW
-    # ========================================================================
+    # ==================================================================
 
     def _window_closed(self):
 
@@ -2278,7 +2154,6 @@ class ZoneXApp:
             return (
                 cv2.getWindowProperty(
                     self.cfg.WINDOW_NAME,
-
                     cv2.WND_PROP_VISIBLE,
                 )
                 < 1
@@ -2288,16 +2163,11 @@ class ZoneXApp:
 
             return True
 
-    # ========================================================================
-    # KEYBOARD
-    # ========================================================================
+    # ==================================================================
+    # OPENCV KEYBOARD
+    # ==================================================================
 
     def _handle_keys(self):
-        """
-        Handle OpenCV keyboard controls.
-        """
-
-        cfg = self.cfg
 
         key = (
             cv2.waitKey(1)
@@ -2308,223 +2178,15 @@ class ZoneXApp:
 
             return True
 
-        # ====================================================================
-        # QUIT
-        # ====================================================================
+        return self._apply_control_key(
+            key
+        )
 
-        if key in (
-            ord("q"),
-            ord("Q"),
-            KEY_ESC,
-        ):
-
-            print(
-                "[ZONE X] Quit requested."
-            )
-
-            return False
-
-        # ====================================================================
-        # ZONE KEYS
-        # ====================================================================
-
-        zone_keys = {
-
-            ord("s"): cfg.ZONE_SAFE,
-
-            ord("S"): cfg.ZONE_SAFE,
-
-            ord("w"): cfg.ZONE_WARNING,
-
-            ord("W"): cfg.ZONE_WARNING,
-
-            ord("d"): cfg.ZONE_DANGER,
-
-            ord("D"): cfg.ZONE_DANGER,
-
-            ord("r"): cfg.ZONE_DANGER,
-
-            ord("R"): cfg.ZONE_DANGER,
-        }
-
-        if key in zone_keys:
-
-            zone_type = (
-                zone_keys[key]
-            )
-
-            self.zones.start_definition(
-                zone_type
-            )
-
-            self._forget_zone_state()
-
-            self.paused = False
-
-            print(
-                "[ZONE X] Defining {}: "
-                "click points, Enter to finish.".format(
-                    self.zones.defining_id
-                    or cfg.ZONE_LABELS[
-                        zone_type
-                    ]
-                )
-            )
-
-            return True
-
-        # ====================================================================
-        # CLEAR ZONES
-        # ====================================================================
-
-        if key in (
-            ord("c"),
-            ord("C"),
-        ):
-
-            if self.zones.is_defining:
-
-                zone_type = (
-                    self.zones.cancel_definition()
-                )
-
-                print(
-                    "[ZONE X] Cancelled {}.".format(
-                        cfg.ZONE_LABELS[
-                            zone_type
-                        ]
-                    )
-                )
-
-            else:
-
-                self.zones.clear()
-
-                print(
-                    "[ZONE X] All zones cleared."
-                )
-
-            self._forget_zone_state()
-
-            return True
-
-        # ====================================================================
-        # MACHINE TOGGLE
-        # ====================================================================
-
-        if key in (
-            ord("m"),
-            ord("M"),
-        ):
-
-            self.machine_on = (
-                not self.machine_on
-            )
-
-            self.zones.last_message = (
-                "Machine {}.".format(
-                    "ON"
-                    if self.machine_on
-                    else "OFF"
-                )
-            )
-
-            print(
-                "[ZONE X] Machine {}.".format(
-                    "ON"
-                    if self.machine_on
-                    else "OFF"
-                )
-            )
-
-            return True
-
-        # ====================================================================
-        # PAUSE
-        # ====================================================================
-
-        if key in (
-            ord("p"),
-            ord("P"),
-        ):
-
-            if self.zones.is_defining:
-
-                self.zones.last_message = (
-                    "Finish or cancel the "
-                    "zone before pausing."
-                )
-
-            else:
-
-                self.paused = (
-                    not self.paused
-                )
-
-                print(
-                    "[ZONE X] {}.".format(
-                        "Paused."
-                        if self.paused
-                        else "Resumed."
-                    )
-                )
-
-            return True
-
-        # ====================================================================
-        # ENTER
-        # ====================================================================
-
-        if key in KEY_ENTER:
-
-            if self.zones.is_defining:
-
-                (
-                    ok,
-                    _,
-                ) = (
-                    self.zones.finish_definition()
-                )
-
-                if ok:
-
-                    zone = (
-                        self.zones.last_finished
-                    )
-
-                    self._forget_zone_state()
-
-                    print(
-                        "[ZONE X] {} set with "
-                        "{} points (area {:.0f} px^2).".format(
-                            zone.zone_id,
-
-                            zone.point_count,
-
-                            zone.area,
-                        )
-                    )
-
-                else:
-
-                    print(
-                        "[ZONE X] {}".format(
-                            self.zones.last_message
-                        )
-                    )
-
-            return True
-
-        return True
-
-    # ========================================================================
+    # ==================================================================
     # FORGET ZONE STATE
-    # ========================================================================
+    # ==================================================================
 
     def _forget_zone_state(self):
-        """
-        Reset tracking/event state after zone configuration changes.
-        """
 
         self.tracker.reset()
 
@@ -2540,10 +2202,6 @@ class ZoneXApp:
 
         self.last_critical_time = 0.0
 
-
-# ============================================================================
-# CONTROLS
-# ============================================================================
 
 def print_controls():
 
@@ -2632,26 +2290,7 @@ def print_controls():
     print("")
 
 
-# ============================================================================
-# ENTRY POINT
-# ============================================================================
-
 def main():
-    """
-    Application entry point.
-    """
-
-    # ------------------------------------------------------------------------
-    # Always execute from project root.
-    #
-    # This makes relative paths such as:
-    #
-    #   models/yolov8n.pt
-    #   logs/
-    #   incidents/
-    #
-    # resolve correctly.
-    # ------------------------------------------------------------------------
 
     project_root = os.path.dirname(
         os.path.abspath(
@@ -2663,10 +2302,6 @@ def main():
         project_root
     )
 
-    # ------------------------------------------------------------------------
-    # Create application
-    # ------------------------------------------------------------------------
-
     app = ZoneXApp(
         config
     )
@@ -2675,21 +2310,9 @@ def main():
 
     try:
 
-        # --------------------------------------------------------------------
-        # Setup
-        # --------------------------------------------------------------------
-
         app.setup()
 
-        # --------------------------------------------------------------------
-        # Run
-        # --------------------------------------------------------------------
-
         app.run()
-
-    # ========================================================================
-    # MODEL ERROR
-    # ========================================================================
 
     except ModelLoadError as exc:
 
@@ -2702,16 +2325,11 @@ def main():
 
         exit_code = 2
 
-    # ========================================================================
-    # FRAME SOURCE ERROR
-    # ========================================================================
-
     except FrameSourceError as exc:
 
         print(
             "\n[ZONE X] FRAME SOURCE ERROR ({})\n{}\n".format(
                 config.SOURCE_TYPE,
-
                 exc,
             ),
             file=sys.stderr,
@@ -2719,19 +2337,11 @@ def main():
 
         exit_code = 3
 
-    # ========================================================================
-    # KEYBOARD INTERRUPT
-    # ========================================================================
-
     except KeyboardInterrupt:
 
         print(
             "\n[ZONE X] Interrupted with Ctrl+C."
         )
-
-    # ========================================================================
-    # UNEXPECTED ERROR
-    # ========================================================================
 
     except Exception:
 
@@ -2746,10 +2356,6 @@ def main():
 
         exit_code = 1
 
-    # ========================================================================
-    # ALWAYS CLEANUP
-    # ========================================================================
-
     finally:
 
         app.cleanup()
@@ -2760,10 +2366,6 @@ def main():
 
     return exit_code
 
-
-# ============================================================================
-# SCRIPT ENTRY
-# ============================================================================
 
 if __name__ == "__main__":
 
