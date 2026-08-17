@@ -64,7 +64,7 @@ VERBOSE_INFERENCE = False
 #
 # "ip" and "cctv" are read identically by OpenCV; they are kept separate purely
 # so the event log records which kind of installation an event came from.
-SOURCE_TYPE ="webcam"
+SOURCE_TYPE = "webcam"
 
 # --- used when SOURCE_TYPE = "webcam" ---
 # 0 is usually the built-in/first camera. Try 1, 2, ... for USB cameras.
@@ -76,7 +76,7 @@ CAMERA_INDEX = 0
 #     ip    "http://<phone-ip>:8080/video"        (IP Webcam)
 #           "http://<phone-ip>:4747/video"        (DroidCam)
 #     cctv  "rtsp://<user>:<pass>@<camera-ip>:554/Streaming/Channels/101"
-SOURCE_URL = "http://172.22.0.144:8080/video" #added by admin
+SOURCE_URL = "http://172.22.0.144:8080/video"  # added by admin
 
 # --- used when SOURCE_TYPE = "video" ---
 # Relative paths are resolved from the project root, so this works no matter
@@ -664,7 +664,217 @@ DEFINING_ZONE_BANNER_TEXT = "[+] DEFINING {} - ENTER TO FINISH"
 HAND_ALERT_TEXT = "[!] HAND ENTERED DANGER ZONE"
 
 
-#BACKEND Connection
+# ---------------------------------------------------------------------------
+# BACKEND Connection
+# ---------------------------------------------------------------------------
+
 BACKEND_URL = "http://localhost:8080"
 BACKEND_INCIDENT_ENDPOINT = "/api/incidents"
 SEND_EVENTS_TO_BACKEND = True
+
+
+# ===========================================================================
+# MQTT INTEGRATION (Added for IoT communication)
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# MQTT CONFIGURATION
+# ---------------------------------------------------------------------------
+
+# Enable/disable MQTT communication
+ENABLE_MQTT = True
+
+# MQTT Broker settings
+MQTT_BROKER_HOST = "localhost"  # or "192.168.1.100" for remote broker
+MQTT_BROKER_PORT = 1883         # Default MQTT port (8883 for SSL)
+
+# MQTT Authentication (optional)
+MQTT_USERNAME = None            # Set to None if no authentication
+MQTT_PASSWORD = None            # Set to None if no authentication
+
+# MQTT Client settings
+MQTT_CLIENT_ID = "zone_x_safety_system"
+MQTT_KEEPALIVE = 60             # Seconds between keepalive packets
+
+# MQTT Topics (using hierarchical structure)
+MQTT_TOPIC_PREFIX = "zone_x"
+MQTT_TOPIC_EVENTS = f"{MQTT_TOPIC_PREFIX}/events"
+MQTT_TOPIC_ALERTS = f"{MQTT_TOPIC_PREFIX}/alerts"
+MQTT_TOPIC_STATUS = f"{MQTT_TOPIC_PREFIX}/status"
+MQTT_TOPIC_PEOPLE = f"{MQTT_TOPIC_PREFIX}/people"
+
+# MQTT QoS Levels (0 = at most once, 1 = at least once, 2 = exactly once)
+MQTT_QOS = 1
+
+# MQTT Retain flag (keep last message on broker)
+MQTT_RETAIN = False
+
+# Send MQTT messages for safety events
+SEND_EVENTS_TO_MQTT = True
+
+# Send MQTT messages for alerts
+SEND_ALERTS_TO_MQTT = True
+
+# Send MQTT messages for status updates
+SEND_STATUS_TO_MQTT = True
+
+# Send MQTT messages for people detection updates
+SEND_PEOPLE_TO_MQTT = False     # Can be chatty, disable by default
+
+# MQTT Reconnect settings
+MQTT_RECONNECT_DELAY = 5.0      # Seconds between reconnect attempts
+MQTT_MAX_RECONNECT_ATTEMPTS = 0 # 0 = unlimited
+
+
+# ===========================================================================
+# GUI SOURCE SELECTOR (Added without modifying existing code)
+# ===========================================================================
+
+import cv2
+import numpy as np
+import sys
+import os
+
+
+def show_source_selector():
+    """
+    Display a GUI window to select the video source at startup.
+    Returns True if selection was made, False if user cancelled.
+    """
+    # Declare globals at the VERY START of the function
+    global SOURCE_TYPE, CAMERA_INDEX, SOURCE_URL, VIDEO_PATH
+    
+    # Check if we should show the selector (can be disabled by environment variable)
+    if os.environ.get("ZONE_SKIP_SELECTOR", "").lower() == "true":
+        return True
+    
+    # Create a blank image for the selection menu
+    width, height = 700, 500
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    
+    # Title
+    cv2.putText(img, "ZONE X - SELECT VIDEO SOURCE", (width//2 - 200, 50), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+    
+    cv2.putText(img, "Press ESC to cancel (will use default webcam)", 
+                (width//2 - 240, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+    
+    # Define menu items with their icons and descriptions
+    menu_items = [
+        {
+            "label": "📷 WEBCAM",
+            "desc": "Built-in or USB camera",
+            "y": 130,
+            "source_type": "webcam",
+            "params": {"camera_index": 0}
+        },
+        {
+            "label": "📱 IP CAMERA",
+            "desc": "HTTP stream (phone apps)",
+            "y": 190,
+            "source_type": "ip",
+            "params": {"source_url": "http://172.22.0.144:8080/video"}
+        },
+        {
+            "label": "🎥 CCTV",
+            "desc": "RTSP stream (IP cameras)",
+            "y": 250,
+            "source_type": "cctv",
+            "params": {"source_url": "rtsp://192.168.1.100:554/stream"}
+        },
+        {
+            "label": "📹 VIDEO FILE",
+            "desc": "Recorded video file",
+            "y": 310,
+            "source_type": "video",
+            "params": {"video_path": "videos/factory_test.mp4"}
+        },
+        {
+            "label": "⚙️ CUSTOM URL",
+            "desc": "Enter any URL manually",
+            "y": 370,
+            "source_type": "custom",
+            "params": {}
+        },
+        {
+            "label": "🚫 CANCEL",
+            "desc": "Use default webcam",
+            "y": 430,
+            "source_type": "cancel",
+            "params": {}
+        }
+    ]
+    
+    # Draw menu items
+    for item in menu_items:
+        y = item["y"]
+        # Background rectangle
+        cv2.rectangle(img, (50, y-25), (width-50, y+20), (60, 60, 60), -1)
+        cv2.rectangle(img, (50, y-25), (width-50, y+20), (100, 100, 100), 1)
+        
+        # Label
+        cv2.putText(img, item["label"], (70, y+5), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Description
+        cv2.putText(img, item["desc"], (width-300, y+5), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+    
+    # Instructions at bottom
+    cv2.putText(img, "Click on an option or press ESC", 
+                (width//2 - 150, height-20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+    
+    selected = [None]  # Use list to allow modification in callback
+    
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            for item in menu_items:
+                item_y = item["y"]
+                if 50 <= x <= width-50 and item_y-25 <= y <= item_y+20:
+                    if item["source_type"] == "custom":
+                        # Handle custom URL
+                        cv2.destroyAllWindows()
+                        custom_input = input("\nEnter video URL (http:// or rtsp://): ")
+                        if custom_input.strip():
+                            # Auto-detect type
+                            if custom_input.startswith("rtsp://"):
+                                source_type = "cctv"
+                            elif custom_input.startswith("http://") or custom_input.startswith("https://"):
+                                source_type = "ip"
+                            else:
+                                source_type = "ip"  # Default to IP
+                            
+                            # Update config - global already declared in outer function
+                            SOURCE_TYPE = source_type
+                            SOURCE_URL = custom_input
+                            selected[0] = True
+                        else:
+                            selected[0] = False
+                    elif item["source_type"] == "cancel":
+                        selected[0] = False
+                        cv2.destroyAllWindows()
+                    else:
+                        # Update config with selection - global already declared in outer function
+                        SOURCE_TYPE = item["source_type"]
+                        if "camera_index" in item["params"]:
+                            CAMERA_INDEX = item["params"]["camera_index"]
+                        if "source_url" in item["params"]:
+                            SOURCE_URL = item["params"]["source_url"]
+                        if "video_path" in item["params"]:
+                            VIDEO_PATH = item["params"]["video_path"]
+                        
+                        selected[0] = True
+                        cv2.destroyAllWindows()
+    
+    cv2.imshow("Source Selector", img)
+    cv2.setMouseCallback("Source Selector", mouse_callback)
+    
+    # Wait for selection or ESC
+    while selected[0] is None:
+        key = cv2.waitKey(50) & 0xFF
+        if key == 27:  # ESC key
+            cv2.destroyAllWindows()
+            return False  # Use default (webcam)
+    
+    cv2.destroyAllWindows()
+    return selected[0]  # True if selection was made

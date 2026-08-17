@@ -71,6 +71,7 @@ from src.fastapi.web_server import WebServer
 from src.safety.risk_engine import RiskEngine
 from src.zones.zone import ZoneManager
 from src.integration.connection import BackendClient
+from src.integration.mqtt_client import MQTTClient
 
 
 KEY_ENTER = (13, 10)
@@ -136,6 +137,12 @@ class ZoneXApp:
     def __init__(self, cfg):
 
         self.cfg = cfg
+
+        # ==============================================================
+        # MQTT HARDWARE ALARM STATE
+        # ==============================================================
+
+        self.hardware_alarm_state = False
 
         # ==============================================================
         # FRAME SOURCE
@@ -279,6 +286,28 @@ class ZoneXApp:
         )
 
         # ==============================================================
+        # MQTT HARDWARE INTEGRATION
+        # ==============================================================
+
+        # Initialize MQTT client with config settings
+        self.mqtt = None
+        if getattr(cfg, "ENABLE_MQTT", True):
+            try:
+                self.mqtt = MQTTClient(
+                    broker_host=getattr(cfg, "MQTT_BROKER_HOST", "localhost"),
+                    broker_port=getattr(cfg, "MQTT_BROKER_PORT", 1883),
+                    topic=getattr(cfg, "MQTT_TOPIC_COMMAND", "sentinel/hardware/command"),
+                    client_id=getattr(cfg, "MQTT_CLIENT_ID", "SentinelVision"),
+                    username=getattr(cfg, "MQTT_USERNAME", None),
+                    password=getattr(cfg, "MQTT_PASSWORD", None),
+                )
+                self.mqtt.connect()
+                print("[ZONE X] MQTT client initialized successfully")
+            except Exception as e:
+                print(f"[ZONE X] Failed to initialize MQTT: {e}")
+                self.mqtt = None
+
+        # ==============================================================
         # ALARM
         # ==============================================================
 
@@ -290,6 +319,59 @@ class ZoneXApp:
 
         self.detector = None
         self.pose = None
+
+    # ==================================================================
+    # MQTT HARDWARE ALARM
+    # ==================================================================
+
+    def _mqtt_alarm_on(self, offenders):
+        if self.mqtt is None:
+            return
+            
+        if self.hardware_alarm_state:
+            return
+
+        self.hardware_alarm_state = True
+
+        person_id = None
+        reason = "SAFETY_VIOLATION"
+
+        if offenders:
+            person_id = offenders[0].get("person_id")
+            zone = offenders[0].get("zone")
+            if zone:
+                reason = str(zone)
+
+        payload = {
+            "command": "ALARM_ON",
+            "reason": reason,
+            "person_id": person_id,
+            "timestamp": time.time()
+        }
+
+        success = self.mqtt.publish(payload)
+
+        if success:
+            print("[HARDWARE] ALARM_ON sent to ESP32")
+
+    def _mqtt_alarm_off(self):
+        if self.mqtt is None:
+            return
+            
+        if not self.hardware_alarm_state:
+            return
+
+        self.hardware_alarm_state = False
+
+        payload = {
+            "command": "ALARM_OFF",
+            "timestamp": time.time()
+        }
+
+        success = self.mqtt.publish(payload)
+
+        if success:
+            print("[HARDWARE] ALARM_OFF sent to ESP32")
 
     # ==================================================================
     # EVENT
@@ -1117,6 +1199,19 @@ class ZoneXApp:
                 file=sys.stderr,
             )
 
+        # Cleanup MQTT
+        if self.mqtt is not None:
+            try:
+                self.mqtt.disconnect()
+                print("[ZONE X] MQTT disconnected")
+            except Exception as exc:
+                print(
+                    "[ZONE X] MQTT cleanup error: {}".format(
+                        exc
+                    ),
+                    file=sys.stderr,
+                )
+
         if self.web_server is not None:
 
             try:
@@ -1689,13 +1784,31 @@ class ZoneXApp:
             )
         )
 
-        if offenders:
+        alarm_should_be_active = bool(offenders)
+
+        # --------------------------------------------------------------
+        # Existing PC alarm behavior
+        # --------------------------------------------------------------
+
+        if alarm_should_be_active:
 
             self.alarm.start_alarm()
 
         else:
 
             self.alarm.stop_alarm()
+
+        # --------------------------------------------------------------
+        # MQTT hardware alarm
+        # --------------------------------------------------------------
+
+        if alarm_should_be_active:
+
+            self._mqtt_alarm_on(offenders)
+
+        else:
+
+            self._mqtt_alarm_off()
 
         if self.alarm.is_alarm_active():
 
@@ -2302,6 +2415,43 @@ def main():
         project_root
     )
 
+    # ==============================================================
+    # SHOW GUI SOURCE SELECTOR BEFORE STARTING
+    # ==============================================================
+    
+    # Check if we should show the selector
+    # Skip if environment variable is set or if command-line args are present
+    show_selector = True
+    
+    # Check for command-line arguments that might indicate we should skip the GUI
+    if len(sys.argv) > 1:
+        # If user provided any command-line arguments, skip the GUI selector
+        # This allows headless/automated use
+        show_selector = False
+    
+    # Check environment variable to skip selector
+    if os.environ.get("ZONE_SKIP_SELECTOR", "").lower() == "true":
+        show_selector = False
+    
+    if show_selector:
+        try:
+            print("\n[ZONE X] Opening source selector...")
+            selection_made = config.show_source_selector()
+            
+            if selection_made:
+                print(f"[ZONE X] Source selected: {config.SOURCE_TYPE}")
+                if config.SOURCE_TYPE == "webcam":
+                    print(f"[ZONE X] Camera index: {config.CAMERA_INDEX}")
+                elif config.SOURCE_TYPE in ["ip", "cctv"]:
+                    print(f"[ZONE X] URL: {config.SOURCE_URL}")
+                elif config.SOURCE_TYPE == "video":
+                    print(f"[ZONE X] Video path: {config.VIDEO_PATH}")
+            else:
+                print("[ZONE X] Using default source: webcam (camera 0)")
+        except Exception as e:
+            print(f"[ZONE X] Error showing source selector: {e}")
+            print("[ZONE X] Continuing with default webcam source...")
+    
     app = ZoneXApp(
         config
     )
