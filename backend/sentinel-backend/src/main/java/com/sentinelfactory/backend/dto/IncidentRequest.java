@@ -4,38 +4,34 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class IncidentRequest {
 
+    // Field 1: timestamp
     private String timestamp;
 
+    // Field 2: person_id
     @JsonProperty("person_id")
     private String personId;
 
-    @JsonProperty("incident_name")
-    private String incidentName;
+    // Field 3: zone_name - NEW (this was missing)
+    @JsonProperty("zone_name")
+    private String zoneName;
 
+    // Field 4: incident_type
     @JsonProperty("incident_type")
     private String incidentType;
 
-    private String source;
-
-    @JsonProperty("body_zone")
-    private String bodyZone;
-
-    @JsonProperty("body_zone_id")
-    private String bodyZoneId;
-
-    @JsonProperty("hand_zone")
-    private String handZone;
-
-    @JsonProperty("hand_zone_id")
-    private String handZoneId;
-
+    // Field 5: picture_url → goes to picture field
     private String picture;
 
+    // Field 6: dwell_seconds
     @JsonProperty("dwell_seconds")
     private Double dwellSeconds;
 
+    // ============ CONSTRUCTOR ============
+    
     public IncidentRequest() {
     }
+
+    // ============ GETTERS AND SETTERS ============
 
     public String getTimestamp() {
         return timestamp;
@@ -53,12 +49,14 @@ public class IncidentRequest {
         this.personId = personId;
     }
 
-    public String getIncidentName() {
-        return incidentName;
+    // NEW: zone_name
+    public String getZoneName() {
+        return zoneName;
     }
 
-    public void setIncidentName(String incidentName) {
-        this.incidentName = incidentName;
+    // NEW: zone_name
+    public void setZoneName(String zoneName) {
+        this.zoneName = zoneName;
     }
 
     public String getIncidentType() {
@@ -69,50 +67,12 @@ public class IncidentRequest {
         this.incidentType = incidentType;
     }
 
-    public String getSource() {
-        return source;
-    }
-
-    public void setSource(String source) {
-        this.source = source;
-    }
-
-    public String getBodyZone() {
-        return bodyZone;
-    }
-
-    public void setBodyZone(String bodyZone) {
-        this.bodyZone = bodyZone;
-    }
-
-    public String getBodyZoneId() {
-        return bodyZoneId;
-    }
-
-    public void setBodyZoneId(String bodyZoneId) {
-        this.bodyZoneId = bodyZoneId;
-    }
-
-    public String getHandZone() {
-        return handZone;
-    }
-
-    public void setHandZone(String handZone) {
-        this.handZone = handZone;
-    }
-
-    public String getHandZoneId() {
-        return handZoneId;
-    }
-
-    public void setHandZoneId(String handZoneId) {
-        this.handZoneId = handZoneId;
-    }
-
+    // This gets picture_url from JSON
     public String getPicture() {
         return picture;
     }
 
+    // This sets picture_url from JSON
     public void setPicture(String picture) {
         this.picture = picture;
     }

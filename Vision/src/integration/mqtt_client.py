@@ -1,102 +1,118 @@
-import json
-import time
+import json #python's built in json module--Used to convert python data into json texts
+import time  #python's built in time ,In this file it is mainly used for connection timeouts.
 
-import paho.mqtt.client as mqtt
+import paho.mqtt.client as mqtt #Python library used for  implementing MQTT
 
 
-class MQTTClient:
+class MQTTClient: #class name 
     """
-    MQTT client used to send safety events from Vision
-    to the ESP32 hardware controller.
+    ZONE X Vision -> Mosquitto -> ESP32
+    Topic:
+        sentinel/hardware/command #MQTT topic (Like channel)  esp32 subscribes it
+    Commands: WARNING, DANGER, CLEAR
     """
 
-    def __init__(
-        self,
-        broker_host="172.22.3.228",
-        broker_port=1883,
-        topic="sentinel/hardware/command",
-        client_id="SentinelVision",
-    ):
-        self.broker_host = broker_host
-        self.broker_port = broker_port
-        self.topic = topic
-        self.client_id = client_id
+    #Constructor -It runs when u create MQTTClient object
+    def __init__(self,broker_host,broker_port=1883,topic="sentinel/hardware/command",client_id="zone-x-vision",):
+        self.broker_host = broker_host #Broker_host is the IP address or Hostname of Mosquitto
+        self.broker_port = broker_port #if you don't provide a port, 1883 is automatically used.
+        self.topic = topic #local host topic -sentinel/hardware/command
+        self.client_id = client_id #Every MQTT client can have a client ID.,This identifies your Vision application to the broker.
 
-        self.client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2,
-            client_id=self.client_id,
-        )
+        self.connected = False #Initially We are not connected.
 
-        self.connected = False
+        self.client = mqtt.Client(client_id=self.client_id) #create the actual Paho MQTT client with self.client_id
+        #MQTTClient class is our abstraction,Paho is the actual MQTT implementation.
 
-        self.client.on_connect = self._on_connect
-        self.client.on_disconnect = self._on_disconnect
+        self.client.on_connect = self._on_connect #Telling Paho--When a connection happens, call my _on_connect() function.
+        self.client.on_disconnect = self._on_disconnect#Telling Paho--When disconnection happens, call my _on_disconnect() function.
 
-    # ------------------------------------------------------------------
-    # MQTT callbacks
-    # ------------------------------------------------------------------
+    # ==========================================================
+    # CONNECT CALLBACK
+    # ==========================================================
 
-    def _on_connect(self, client, userdata, flags, reason_code, properties):
-        if reason_code == 0:
+    def _on_connect( self, #This function is called by Paho when connection processing happens.
+                     client,#The Paho client object.
+                     userdata, #Optional user data.
+                       flags, #Connection flags provided by MQTT.
+                         rc,): #Return code.This tells you whether connection succeeded.
+        if rc == 0:
             self.connected = True
-            print(
-                "[MQTT] Connected to {}:{}".format(
-                    self.broker_host,
-                    self.broker_port,
-                )
-            )
-        else:
-            self.connected = False
-            print(
-                "[MQTT] Connection failed: {}".format(
-                    reason_code
-                )
-            )
 
-    def _on_disconnect(
-        self,
-        client,
-        userdata,
-        disconnect_flags,
-        reason_code,
-        properties,
-    ):
+            print("[MQTT] CONNECTED to {}:{}".format( self.broker_host, self.broker_port,))
+
+        else:
+
+            self.connected = False
+
+            print("[MQTT] CONNECT FAILED rc={}".format(rc))
+
+    # ==========================================================
+    # DISCONNECT CALLBACK
+    # ==========================================================
+
+    def _on_disconnect(self,client, userdata,rc, ): #Paho automatically calls this when the MQTT connection is lost or disconnected.
         self.connected = False
 
-        print(
-            "[MQTT] Disconnected. reason={}".format(
-                reason_code
-            )
-        )
+        print( "[MQTT] DISCONNECTED rc={}".format(rc))
+        #In Paho MQTT, rc == 0 means successful connection.
 
-    # ------------------------------------------------------------------
-    # Connect
-    # ------------------------------------------------------------------
+    # ==========================================================
+    # CONNECT
+    # ==========================================================
 
-    def connect(self):
-        """
-        Connect to Mosquitto without crashing the Vision pipeline.
-        """
+    def connect(self): #Try to connect Vision to Mosquitto.,we call it explicitly
+        try:
+            print( "[MQTT] Connecting to {}:{}...".format( self.broker_host,self.broker_port, ))
+
+            self.client.connect(self.broker_host,self.broker_port,
+                                keepalive=60,) #This means the MQTT connection uses a 60-second keepalive interval.
+
+            # Keep MQTT network processing alive
+            #MQTT needs a network-processing loop.
+            self.client.loop_start() #loop_start() runs that loop in a background thread.
+
+            deadline = time.time() + 5.0 #we give MQTT five seconds to confirm the connection.
+
+            while (not self.connected      #Keep waiting while MQTT hasn't confirmed the connection AND we haven't exceeded 5 seconds.
+and time.time() < deadline
+            ):
+                time.sleep(0.05) #Wait 50 milliseconds before checking again.
+
+            if not self.connected:
+
+                print("[MQTT] Connection was not confirmed.")
+
+                return False
+
+            print("[MQTT] Connection confirmed.")
+
+            return True
+
+        except Exception as exc:
+
+            self.connected = False
+
+            print("[MQTT] Connection error: {}".format(exc))
+
+            return False
+
+    # ==========================================================
+    # ENSURE CONNECTION
+    # ==========================================================
+
+    def ensure_connected(self): #"Before sending a command, confirm that  are we connected?"
+
+        if self.connected:
+            return True
+
+        print("[MQTT] Connection lost. Reconnecting...")
 
         try:
-            print(
-                "[MQTT] Connecting to {}:{} ...".format(
-                    self.broker_host,
-                    self.broker_port,
-                )
-            )
 
-            self.client.connect(
-                self.broker_host,
-                self.broker_port,
-                60,
-            )
+            self.client.reconnect()
 
-            # Background MQTT network loop.
-            self.client.loop_start()
-
-            # Give the connection a short moment to establish.
-            deadline = time.time() + 3.0
+            deadline = time.time() + 5.0
 
             while (
                 not self.connected
@@ -104,90 +120,128 @@ class MQTTClient:
             ):
                 time.sleep(0.05)
 
-            if not self.connected:
-                print(
-                    "[MQTT] Broker connection not confirmed."
-                )
-
         except Exception as exc:
+
+            print("[MQTT] Reconnect failed: {}".format(exc))
+
             self.connected = False
 
-            print(
-                "[MQTT] Connection error: {}".format(
-                    exc
-                )
-            )
+        return self.connected
 
-    # ------------------------------------------------------------------
-    # Publish
-    # ------------------------------------------------------------------
+    # ==========================================================
+    # PUBLISH COMMAND
+    # ==========================================================
 
-    def publish(self, payload):
-        """
-        Publish a JSON payload to the configured MQTT topic.
-        """
+    def publish_command(self, command): #This is the core function of our hardware communication.
 
-        if not self.connected:
-            print(
-                "[MQTT] Not connected; event not published."
-            )
+        command = str(command).strip().upper()
+
+        allowed_commands = {"WARNING","DANGER","CLEAR",}
+
+        if command not in allowed_commands:
+
+            print("[MQTT] Invalid command: {}".format(command ))
+
             return False
+
+        if not self.ensure_connected():
+
+            print("[MQTT] Cannot send {}. MQTT is not connected.".format( command) )
+
+            return False
+
+        payload = json.dumps( {"command": command},separators=(",", ":"),) #Build the JSON payload
+
+        print("[MQTT] ========================================")
+
+        print("[MQTT] COMMAND : {}".format(command))
+
+        print("[MQTT] TOPIC   : {}".format( self.topic))
+
+        print("[MQTT] PAYLOAD : {}".format(payload ))
+
+        print( "[MQTT] ========================================")
 
         try:
-            message = json.dumps(
-                payload,
-                default=str,
+
+            result = self.client.publish( #Send this message to this MQTT topic.
+                self.topic, #sentinel/hardware/command
+                payload, #ex:{"command":"DANGER"}
+                qos=1, #Deliver at least once.
+                retain=False, #Telling mosquito not to  store this command as the retained last message.
             )
+            #result.rc tells whether the publish request was successfully accepted by the MQTT client.
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
 
-            result = self.client.publish(
-                self.topic,
-                message,
-                qos=1,
-                retain=False,
-            )
+                print("[MQTT] Publish failed. rc={}".format(result.rc))
 
-            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                return False
 
-                print(
-                    "[MQTT] Published: {}".format(
-                        message
-                    )
-                )
+            try:
 
-                return True
+                result.wait_for_publish(timeout=3) #waits up to three seconds for the message to actually be processed by the MQTT client.
 
-            print(
-                "[MQTT] Publish failed. rc={}".format(
-                    result.rc
-                )
-            )
+            except Exception:
+                pass
 
-            return False
+            if not result.is_published():
+
+                print("[MQTT] WARNING: publish not confirmed.")
+
+                return False
+
+            print("[MQTT] SENT: {}".format(command))
+
+            return True
 
         except Exception as exc:
 
-            print(
-                "[MQTT] Publish exception: {}".format(
-                    exc
-                )
-            )
+            print("[MQTT] Publish exception: {}".format(exc))
+
+            self.connected = False
 
             return False
 
-    # ------------------------------------------------------------------
-    # Shutdown
-    # ------------------------------------------------------------------
+    # ==========================================================
+    # WARNING
+    # ==========================================================
+
+    def warning(self):
+
+        return self.publish_command("WARNING")
+
+    # ==========================================================
+    # DANGER
+    # ==========================================================
+
+    def danger(self):
+
+        return self.publish_command("DANGER")
+
+    # ==========================================================
+    # CLEAR
+    # ==========================================================
+
+    def clear(self):
+
+        return self.publish_command( "CLEAR")
+
+    # ==========================================================
+    # DISCONNECT
+    # ==========================================================
 
     def disconnect(self):
 
         try:
+
             self.client.loop_stop()
+
             self.client.disconnect()
+
+            self.connected = False
+
+            print( "[MQTT] Disconnected.")
 
         except Exception as exc:
 
-            print(
-                "[MQTT] Disconnect error: {}".format(
-                    exc
-                )
-            )
+            print("[MQTT] Disconnect error: {}".format(exc))

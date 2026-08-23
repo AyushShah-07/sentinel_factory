@@ -90,6 +90,7 @@ class RestrictedZone:
     def area(self):
         if self._polygon is None:
             return 0.0
+
         return polygon_area(self._polygon)
 
     def set_frame_size(self, width, height):
@@ -105,6 +106,7 @@ class RestrictedZone:
         self.points = []
         self._polygon = None
         self.hover_point = None
+
         self.last_message = (
             "Click to add points. ENTER = finish, C = cancel."
         )
@@ -114,11 +116,13 @@ class RestrictedZone:
         self.points = []
         self._polygon = None
         self.hover_point = None
+
         self.last_message = "Restricted area cleared."
 
     def undo_last_point(self):
         if self.state == STATE_DEFINING and self.points:
             self.points.pop()
+
             self.last_message = (
                 "Removed last point ({} left).".format(
                     len(self.points)
@@ -174,6 +178,7 @@ class RestrictedZone:
         )
 
         if event == cv2.EVENT_MOUSEMOVE:
+
             self.hover_point = point
 
         elif event == cv2.EVENT_LBUTTONDOWN:
@@ -191,6 +196,7 @@ class RestrictedZone:
             )
 
         elif event == cv2.EVENT_RBUTTONDOWN:
+
             self.undo_last_point()
 
     # ------------------------------------------------------------------
@@ -234,6 +240,7 @@ class RestrictedZone:
         if feet is None:
             person["zone"] = None
             person["zone_id"] = None
+
             return None, None
 
         try:
@@ -243,6 +250,7 @@ class RestrictedZone:
         except (TypeError, ValueError):
             person["zone"] = None
             person["zone_id"] = None
+
             return None, None
 
         zone = self.classify_zone(point)
@@ -250,6 +258,7 @@ class RestrictedZone:
         if zone is None:
             person["zone"] = None
             person["zone_id"] = None
+
             return None, None
 
         person["zone"] = zone.zone_type
@@ -1089,6 +1098,85 @@ class ZoneManager:
             return self.cfg.ZONE_OUTSIDE
 
         return zone.zone_type
+
+    # ------------------------------------------------------------------
+    # GET ZONE AT
+    # ------------------------------------------------------------------
+
+    def get_zone_at(self, x, y=None):
+        """
+        Return the SafetyZone containing the supplied point.
+
+        Supports both calling styles:
+
+            get_zone_at(x, y)
+
+        and:
+
+            get_zone_at((x, y))
+
+        This method is used by main.py for hand/foot zone
+        classification.
+
+        Returns:
+            SafetyZone object if the point is inside a zone,
+            otherwise None.
+        """
+
+        # --------------------------------------------------------------
+        # Support get_zone_at((x, y))
+        # --------------------------------------------------------------
+
+        if y is None:
+
+            if isinstance(x, (tuple, list, np.ndarray)):
+
+                if len(x) < 2:
+                    return None
+
+                try:
+                    point = (
+                        float(x[0]),
+                        float(x[1]),
+                    )
+
+                except (TypeError, ValueError):
+                    return None
+
+            else:
+                return None
+
+        # --------------------------------------------------------------
+        # Support get_zone_at(x, y)
+        # --------------------------------------------------------------
+
+        else:
+            try:
+                point = (float(x), float(y))
+            except (TypeError, ValueError):
+                    return self.cfg.ZONE_OUTSIDE, None
+
+            zone = self.classify_zone(point)
+
+            if zone is None:
+                    return self.cfg.ZONE_OUTSIDE, None
+
+            return zone.zone_type, zone.zone_id
+
+        # --------------------------------------------------------------
+        # Check all ready zones according to configured priority
+        # --------------------------------------------------------------
+
+        for zone in self.iter_ready():
+
+            try:
+                if zone.contains(point):
+                    return zone
+
+            except (TypeError, ValueError):
+                continue
+
+        return None
 
     def resolve_confirmed(self, confirmed):
 

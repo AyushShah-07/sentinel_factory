@@ -718,23 +718,23 @@ class EventLog:
             return None
 
         # ----------------------------------------------------
-        # JSON RECORD
+        # DETERMINE ZONE NAME
+        # ----------------------------------------------------
+        
+        # Use body_zone_id if available, otherwise hand_zone_id
+        zone_name = body_zone_id or hand_zone_id or "UNKNOWN"
+
+        # ----------------------------------------------------
+        # JSON RECORD - 6 COLUMNS ONLY
         # ----------------------------------------------------
 
         record = {
             "timestamp": timestamp,
             "person_id": person_id_value,
-            "incident_name": incident_name,
+            "zone_name": zone_name,
             "incident_type": "DANGER",
-            "source": source,
-
-            "body_zone": body_zone,
-            "body_zone_id": body_zone_id,
-
-            "hand_zone": hand_zone,
-            "hand_zone_id": hand_zone_id,
-
-            "picture": picture,
+            "picture_url": picture,
+            "dwell_seconds": 0.0,
         }
 
         self._append_json(
@@ -791,8 +791,8 @@ class EventLog:
         return record
 
     # ========================================================
-# WARNING INCIDENT
-# ========================================================
+    # WARNING INCIDENT
+    # ========================================================
     def _warning_update(
         self,
         person,
@@ -1059,36 +1059,16 @@ class EventLog:
             return None
 
         # ====================================================
-        # CREATE EVENT
+        # JSON RECORD - 6 COLUMNS ONLY
         # ====================================================
 
         record = {
             "timestamp": timestamp,
             "person_id": pid,
-
-            "incident_name":
-                WARNING_INCIDENT_NAME,
-
-            "incident_type":
-                "WARNING",
-
-            "zone":
-                "WARNING",
-
-            "zone_id":
-                warning_zone_id,
-
-            "source":
-                warning_source,
-
-            "dwell_seconds":
-                round(
-                    elapsed,
-                    2,
-                ),
-
-            "picture":
-                picture,
+            "zone_name": warning_zone_id,
+            "incident_type": "WARNING",
+            "picture_url": picture,
+            "dwell_seconds": round(elapsed, 1),
         }
 
         # ====================================================

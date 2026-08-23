@@ -28,11 +28,6 @@ export const Topbar = () => {
         </div>
       </div>
 
-      <div className="topbar__actions">
-        <button type="button">Notifications</button>
-        <button type="button">Settings</button>
-        <button type="button">Operator</button>
-      </div>
     </header>
   )
 }

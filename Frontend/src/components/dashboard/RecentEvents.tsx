@@ -37,7 +37,7 @@ export const RecentEvents = ({ events }: Props) => {
                 <td>{event.cameraId}</td>
                 <td>{event.eventType}</td>
                 <td>
-                  {Math.round(event.riskScore * 100)}%
+                  {event.riskScore != null ? `${Math.round(event.riskScore * 100)}%` : 'N/A'}
                 </td>
               </tr>
             ))}

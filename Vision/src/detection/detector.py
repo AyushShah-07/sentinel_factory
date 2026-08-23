@@ -1,18 +1,6 @@
 """
 src/detector.py
----------------
-Everything YOLO lives here. The rest of the program never imports ultralytics.
-
-Responsibilities:
-  * make sure the weights file exists (download once if needed)
-  * load the YOLOv8 model
-  * run inference on a frame
-  * keep ONLY "person" detections above the confidence threshold
-  * return plain Python data: [{"bbox": (x1,y1,x2,y2), "confidence": 0.87}, ...]
-
-Returning plain dicts (instead of ultralytics objects) keeps the detector
-swappable -- later phases could replace YOLOv8 with anything else and the UI,
-zone and alert logic would not change one line.
+Handles YOLO person detection - finds people in video frames
 """
 
 import os
@@ -20,20 +8,20 @@ import shutil
 
 
 class ModelLoadError(Exception):
-    """Raised when the YOLO weights cannot be found, downloaded, or loaded."""
+    """Error when YOLO weights file can't be found or loaded"""
+    pass
 
 
 def ensure_model_file(model_path, download_name):
     """
-    Guarantee that `model_path` exists on disk, returning the usable path.
-
-    Ultralytics can auto-download official weights, but it drops them in the
-    current working directory. We want them tidy inside models/, so we let
-    ultralytics fetch the file and then move it into place ourselves.
+    Make sure the YOLO weights file exists on disk.
+    Downloads it automatically if missing.
     """
+    # If file already exists, use it
     if os.path.isfile(model_path):
         return model_path
 
+    # Create folder if needed
     model_dir = os.path.dirname(model_path)
     if model_dir:
         os.makedirs(model_dir, exist_ok=True)
@@ -45,23 +33,24 @@ def ensure_model_file(model_path, download_name):
     try:
         from ultralytics.utils.downloads import attempt_download_asset
 
+        # Download the model
         downloaded = str(attempt_download_asset(download_name))
 
+        # Move downloaded file to correct location
         if os.path.isfile(downloaded):
             if os.path.abspath(downloaded) != os.path.abspath(model_path):
                 shutil.move(downloaded, model_path)
             print("[ZONE X] Model saved to '{}'.".format(model_path))
             return model_path
 
-        # No exception, but no file either. Ultralytics returns the name
-        # unchanged when it does not recognise the asset, so this is what an
-        # unknown/misspelled MODEL_DOWNLOAD_NAME looks like.
+        # If download didn't work
         reason = ("'{}' is not a recognised ultralytics asset name, so nothing "
                   "was downloaded".format(download_name))
 
     except Exception as exc:
         reason = "{}: {}".format(type(exc).__name__, exc)
 
+    # If everything failed, show helpful error
     raise ModelLoadError(
         "Could not obtain the YOLO weights '{name}'.\n"
         "  Reason: {reason}\n"
@@ -78,7 +67,7 @@ def ensure_model_file(model_path, download_name):
 
 
 class PersonDetector:
-    """Thin, well-behaved wrapper around a pretrained YOLOv8 model."""
+    """Wrapper around YOLOv8 that only detects people"""
 
     def __init__(
         self,
@@ -91,15 +80,18 @@ class PersonDetector:
         device=None,
         verbose=False,
     ):
-        self.confidence_threshold = confidence_threshold
-        self.iou_threshold = iou_threshold
-        self.person_class_id = person_class_id
-        self.imgsz = imgsz
-        self.device = device
-        self.verbose = verbose
+        # Store settings
+        self.confidence_threshold = confidence_threshold  # Minimum confidence to count detection
+        self.iou_threshold = iou_threshold  # For removing duplicate boxes
+        self.person_class_id = person_class_id  # COCO class ID for "person" is 0
+        self.imgsz = imgsz  # Image size YOLO will resize to
+        self.device = device  # CPU or GPU
+        self.verbose = verbose  # Show/hide YOLO output
 
+        # Make sure model file exists (download if missing)
         resolved_path = ensure_model_file(model_path, download_name)
 
+        # Try importing ultralytics
         try:
             from ultralytics import YOLO
         except ImportError as exc:
@@ -109,6 +101,7 @@ class PersonDetector:
                 "  Details: {}".format(exc)
             )
 
+        # Load the YOLO model
         try:
             self.model = YOLO(resolved_path)
         except Exception as exc:
@@ -124,66 +117,68 @@ class PersonDetector:
 
     def detect(self, frame):
         """
-        Run one inference pass and return a list of person detections:
-
-            [{"bbox": (x1, y1, x2, y2), "confidence": float}, ...]
-
-        Coordinates are ints in the frame's own pixel space. An empty list is a
-        completely normal result -- it just means nobody is in view.
+        Find all people in a frame and return their bounding boxes.
+        
+        Returns: [{"bbox": (x1, y1, x2, y2), "confidence": 0.87}, ...]
+        Empty list means no people found.
         """
+        # Ignore empty frames
         if frame is None or getattr(frame, "size", 0) == 0:
             return []
 
+        # Set up YOLO parameters
         predict_kwargs = {
             "source": frame,
-            "conf": self.confidence_threshold,
-            "iou": self.iou_threshold,
-            # Ask YOLO for the person class only. This is faster and safer than
-            # detecting all 80 COCO classes and filtering afterwards.
-            "classes": [self.person_class_id],
+            "conf": self.confidence_threshold,  # Filter by confidence
+            "iou": self.iou_threshold,  # Remove overlapping boxes
+            "classes": [self.person_class_id],  # Only detect people (not all 80 classes)
             "imgsz": self.imgsz,
             "verbose": self.verbose,
         }
         if self.device is not None:
             predict_kwargs["device"] = self.device
 
+        # Run YOLO detection
         try:
             results = self.model.predict(**predict_kwargs)
         except Exception as exc:
-            # One bad frame must never kill a live safety monitor.
+            # Don't crash on one bad frame
             print("[ZONE X] Warning: inference failed on this frame: {}".format(exc))
             return []
 
         detections = []
         frame_height, frame_width = frame.shape[:2]
 
+        # Process results
         for result in results:
             boxes = getattr(result, "boxes", None)
             if boxes is None or len(boxes) == 0:
-                continue
+                continue  # No boxes in this result
 
             for box in boxes:
                 class_id = int(box.cls[0])
                 confidence = float(box.conf[0])
 
-                # Belt-and-braces: re-check class and confidence even though we
-                # already asked YOLO to filter them.
+                # Double-check it's a person and meets confidence threshold
                 if class_id != self.person_class_id:
                     continue
                 if confidence < self.confidence_threshold:
                     continue
 
+                # Get box coordinates (x1, y1, x2, y2)
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
 
-                # Clip to the frame so boxes never extend past the image edges.
+                # Clip box to frame edges so it never goes outside image
                 x1 = int(max(0, min(x1, frame_width - 1)))
                 y1 = int(max(0, min(y1, frame_height - 1)))
                 x2 = int(max(0, min(x2, frame_width - 1)))
                 y2 = int(max(0, min(y2, frame_height - 1)))
 
+                # Skip if box has zero width or height
                 if x2 <= x1 or y2 <= y1:
-                    continue  # degenerate box, ignore
+                    continue
 
+                # Save detection as simple dict (not YOLO object)
                 detections.append({"bbox": (x1, y1, x2, y2), "confidence": confidence})
 
         return detections

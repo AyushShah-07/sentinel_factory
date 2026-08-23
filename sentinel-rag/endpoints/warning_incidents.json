@@ -1,0 +1,10 @@
+[
+  {
+    "timestamp": "2026-08-21T12:12:51.906",
+    "person_id": "P1",
+    "zone_name": "WARNING_1",
+    "incident_type": "WARNING",
+    "picture_url": "C:\\projects\\Sentinel_factory\\sentinel_factory 3\\sentinel_factory 3\\sentinel_factory\\Vision\\logs\\incidents\\warning\\P1_2026-08-21_12-12-51-906570.jpg",
+    "dwell_seconds": 5.1
+  }
+]

@@ -7,8 +7,6 @@ import { Overview } from './pages/Overview'
 import { LiveMonitoring } from './pages/LiveMonitoring'
 import { Events } from './pages/Events'
 import { Alerts } from './pages/Alerts'
-import { SafetyZones } from './pages/SafetyZones'
-import { Devices } from './pages/Devices'
 import { SafetyAgent } from './pages/SafetyAgent'
 import './App.css'
 import './components/common/LoadingState.css'
@@ -23,7 +21,9 @@ import './components/dashboard/RecentEvents.css'
 import './components/dashboard/RecentAlerts.css'
 import './components/video/LiveVideoPlayer.css'
 import './components/alerts/AlertDetailDrawer.css'
+import './components/chat/SafetyChat.css'
 import './pages/SafetyAgent.css'
+import { SafetyChat } from './components/chat/SafetyChat'
 
 function App() {
   return (
@@ -40,14 +40,13 @@ function App() {
                 <Route path="/live" element={<LiveMonitoring />} />
                 <Route path="/events" element={<Events />} />
                 <Route path="/alerts" element={<Alerts />} />
-                <Route path="/zones" element={<SafetyZones />} />
-                <Route path="/devices" element={<Devices />} />
                 <Route path="/agent" element={<SafetyAgent />} />
               </Routes>
               <footer className="app-footer">
                 Advisory monitoring system. Does not replace machine guarding, emergency stops, interlocks, or established safety procedures.
               </footer>
             </div>
+            <SafetyChat />
           </div>
         </div>
       </DataProvider>

@@ -1,48 +1,30 @@
 export interface EventRecord {
   id: number
   cameraId: string
-  employeeId: number | null
-  eventId: string
+  zoneName: string        // From JSON - zone_name (NEW)
+  dwellSeconds: number    // From JSON - dwell_seconds (NEW)
+  incidentType: string    // From JSON - incident_type (NEW)
   eventType: string
-  riskScore: number | null
   timestamp: string
-  trackId: string | null
-  zone: string | null
-  machineState: string | null
 }
 
 export interface AlertRecord {
   id: number
 
-  alertType: string
-  severity: string
   status: string
 
   message?: string
 
   timestamp?: string
 
-  eventId?: string
+  eventId?: string | number
 
   cameraId?: string
 
-  zone?: string | null
-
-  riskScore?: number | null
-
   personId?: string | null
 
-  incidentName?: string | null
-
-  source?: string | null
-
-  bodyZone?: string | null
-
-  bodyZoneId?: string | null
-
-  handZone?: string | null
-
-  handZoneId?: string | null
+  zoneName: string        // From JSON - zone_name (NEW)
+  incidentType: string    // From JSON - incident_type (NEW)
 
   picture?: string | null
 

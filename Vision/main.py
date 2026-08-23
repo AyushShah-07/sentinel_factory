@@ -9,42 +9,33 @@ Application entry point and pipeline orchestrator.
 
 Pipeline:
 
-    FrameSource
+    Camera/Video (FrameSource)
         ↓
-    PersonDetector
+    Person Detection (PersonDetector)
         ↓
-    PersonTracker
+    Person Tracking (PersonTracker)
         ↓
-    ZoneManager
+    Zone Checking (ZoneManager)
         ↓
-    Pose / WristDetector
+    Hand/Wrist Detection (Pose / WristDetector)
         ↓
-    RiskEngine
+    Risk Calculation (RiskEngine)
         ↓
-    EventLog
+    Event Recording (EventLog)
         ↓
-    Alarm
+    Alarm (Alarm)
         ↓
-    UI Rendering
-        ↓
-    ┌──────────────────────────────┐
-    │                              │
-    ↓                              ↓
-OpenCV Window                 FastAPI Dashboard
-                                   ↓
-                            FrameBroadcaster
+    Show on Screen (UI Rendering)
 
-Event pipeline:
+MQTT:
 
-    EventLog
+    Vision
         ↓
-    Local JSON
+    sentinel/hardware/command
         ↓
-    Incident Image
+    ESP32
         ↓
-    BackendClient
-        ↓
-    Spring Boot Backend
+    WARNING / DANGER / CLEAR
 """
 
 import collections
@@ -79,21 +70,19 @@ KEY_ESC = 27
 
 
 class FpsMeter:
+    """Measures how many frames per second we're processing."""
 
     def __init__(self, window=30):
-
         self._durations = collections.deque(
             maxlen=max(1, int(window))
         )
-
         self._last_time = None
 
     def tick(self):
-
+        """Record the processing time between frames."""
         now = time.perf_counter()
 
         if self._last_time is not None:
-
             self._durations.append(
                 now - self._last_time
             )
@@ -102,7 +91,7 @@ class FpsMeter:
 
     @property
     def fps(self):
-
+        """Return the current FPS."""
         if not self._durations:
             return 0.0
 
@@ -118,7 +107,10 @@ class FpsMeter:
 
 
 def _incident_offender(incident):
-
+    """
+    Create a standard offender record from an incident.
+    Used when the person who caused the incident is no longer visible.
+    """
     return {
         "id": incident.track_id,
         "person_id": incident.person_id,
@@ -133,19 +125,23 @@ def _incident_offender(incident):
 
 
 class ZoneXApp:
+    """Main application class that runs the whole system."""
 
     def __init__(self, cfg):
-
         self.cfg = cfg
 
         # ==============================================================
-        # MQTT HARDWARE ALARM STATE
+        # HARDWARE STATE
         # ==============================================================
 
         self.hardware_alarm_state = False
+        self.hardware_zone_state = None
+
+        # Hold danger briefly to avoid pose flicker
+        self.hardware_danger_until = 0.0
 
         # ==============================================================
-        # FRAME SOURCE
+        # CAMERA / VIDEO SOURCE
         # ==============================================================
 
         self.source = None
@@ -165,7 +161,7 @@ class ZoneXApp:
         self.web_server = None
 
         # ==============================================================
-        # PROCESSING
+        # PROCESSING CONTROL
         # ==============================================================
 
         self.schedule = ProcessingScheduler(None)
@@ -245,7 +241,10 @@ class ZoneXApp:
         # RISK ENGINE
         # ==============================================================
 
-        self.risk_engine = RiskEngine(cfg)
+        self.risk_engine = RiskEngine(
+            cfg,
+            zones=self.zones,
+        )
 
         # ==============================================================
         # EVENTS
@@ -274,7 +273,7 @@ class ZoneXApp:
         )
 
         # ==============================================================
-        # SPRING BOOT
+        # SPRING BOOT BACKEND
         # ==============================================================
 
         self.backend = BackendClient(
@@ -285,30 +284,40 @@ class ZoneXApp:
             )
         )
 
-        # ==============================================================
-        # MQTT HARDWARE INTEGRATION
-        # ==============================================================
+# ==============================================================
+# MQTT HARDWARE
+# ==============================================================
 
-        # Initialize MQTT client with config settings
-        self.mqtt = None
-        if getattr(cfg, "ENABLE_MQTT", True):
-            try:
-                self.mqtt = MQTTClient(
-                    broker_host=getattr(cfg, "MQTT_BROKER_HOST", "localhost"),
-                    broker_port=getattr(cfg, "MQTT_BROKER_PORT", 1883),
-                    topic=getattr(cfg, "MQTT_TOPIC_COMMAND", "sentinel/hardware/command"),
-                    client_id=getattr(cfg, "MQTT_CLIENT_ID", "SentinelVision"),
-                    username=getattr(cfg, "MQTT_USERNAME", None),
-                    password=getattr(cfg, "MQTT_PASSWORD", None),
+        self.mqtt = MQTTClient(
+            broker_host="172.22.2.158",
+            broker_port=1883,
+            topic="sentinel/hardware/command",
+            client_id="zone-x-vision",
+        )
+
+        try:
+
+            mqtt_ok = self.mqtt.connect()
+
+            if mqtt_ok:
+                print(
+                    "[ZONE X] MQTT hardware connection READY."
                 )
-                self.mqtt.connect()
-                print("[ZONE X] MQTT client initialized successfully")
-            except Exception as e:
-                print(f"[ZONE X] Failed to initialize MQTT: {e}")
-                self.mqtt = None
+            else:
+                print(
+                    "[ZONE X] MQTT hardware connection FAILED."
+                )
 
+        except Exception as exc:
+
+            print(
+                "[MQTT] Connection failed: {}".format(
+                    exc
+                ),
+                file=sys.stderr,
+            )
         # ==============================================================
-        # ALARM
+        # PC ALARM
         # ==============================================================
 
         self.alarm = Alarm.from_config(cfg)
@@ -321,73 +330,22 @@ class ZoneXApp:
         self.pose = None
 
     # ==================================================================
-    # MQTT HARDWARE ALARM
-    # ==================================================================
-
-    def _mqtt_alarm_on(self, offenders):
-        if self.mqtt is None:
-            return
-            
-        if self.hardware_alarm_state:
-            return
-
-        self.hardware_alarm_state = True
-
-        person_id = None
-        reason = "SAFETY_VIOLATION"
-
-        if offenders:
-            person_id = offenders[0].get("person_id")
-            zone = offenders[0].get("zone")
-            if zone:
-                reason = str(zone)
-
-        payload = {
-            "command": "ALARM_ON",
-            "reason": reason,
-            "person_id": person_id,
-            "timestamp": time.time()
-        }
-
-        success = self.mqtt.publish(payload)
-
-        if success:
-            print("[HARDWARE] ALARM_ON sent to ESP32")
-
-    def _mqtt_alarm_off(self):
-        if self.mqtt is None:
-            return
-            
-        if not self.hardware_alarm_state:
-            return
-
-        self.hardware_alarm_state = False
-
-        payload = {
-            "command": "ALARM_OFF",
-            "timestamp": time.time()
-        }
-
-        success = self.mqtt.publish(payload)
-
-        if success:
-            print("[HARDWARE] ALARM_OFF sent to ESP32")
-
-    # ==================================================================
-    # EVENT
+    # EVENT HANDLER
     # ==================================================================
 
     def _handle_event(self, record):
+        """
+        Called whenever an event happens.
+        Sends the event to the Spring Boot backend.
+        """
 
         if self.cfg.LOG_EVENTS_TO_CONSOLE:
-
             self._print_event(record)
 
         if self.backend is None:
             return
 
         try:
-
             self.backend.send_incident(record)
 
             print(
@@ -400,7 +358,6 @@ class ZoneXApp:
             )
 
         except Exception as exc:
-
             print(
                 "[BACKEND] Failed to send event: {}".format(
                     exc
@@ -409,10 +366,232 @@ class ZoneXApp:
             )
 
     # ==================================================================
+    # ESP32 HARDWARE OUTPUT
+    # ==================================================================
+
+    def _set_hardware_state(self, state):
+        """
+        Control the physical ESP32.
+
+        WARNING -> Yellow LED
+        DANGER  -> Red LED + Buzzer
+        CLEAR   -> Everything OFF
+
+        Only publish when the state changes.
+        """
+
+        if self.mqtt is None:
+            return
+
+        state = str(
+            state
+        ).upper().strip()
+
+        if state == self.hardware_zone_state:
+            return
+
+        try:
+            if state == "WARNING":
+                success = self.mqtt.warning()
+
+            elif state == "DANGER":
+                success = self.mqtt.danger()
+
+            elif state == "CLEAR":
+                success = self.mqtt.clear()
+
+            else:
+                print(
+                    "[HARDWARE] Invalid state: {}".format(
+                        state
+                    )
+                )
+                return
+
+            if success:
+                self.hardware_zone_state = state
+
+                self.hardware_alarm_state = (
+                    state == "DANGER"
+                )
+
+                print(
+                    "[HARDWARE] ESP32 state = {}".format(
+                        state
+                    )
+                )
+
+            else:
+                print(
+                    "[HARDWARE] Failed to send state = {}".format(
+                        state
+                    )
+                )
+
+        except Exception as exc:
+            print(
+                "[HARDWARE] MQTT error: {}".format(
+                    exc
+                ),
+                file=sys.stderr,
+            )
+
+    # ==================================================================
+    # ESP32 HARDWARE DECISION
+    # ==================================================================
+
+    def _update_hardware(self):
+        """
+        Determine the physical hardware state.
+
+        Priority:
+
+            DANGER > WARNING > CLEAR
+
+        DANGER sources:
+
+            body in danger
+            hand in danger
+            feet in danger
+
+        WARNING sources:
+
+            body in warning
+            hand in warning
+        """
+
+        cfg = self.cfg
+        now = time.monotonic()
+
+        danger_detected = False
+        warning_detected = False
+
+        # --------------------------------------------------------------
+        # Check every tracked person
+        # --------------------------------------------------------------
+
+        for person in self.people:
+
+            body_zone = person.get(
+                "zone"
+            )
+
+            hand_zone = person.get(
+                "hand_zone"
+            )
+
+            hand_in_danger = bool(
+                person.get(
+                    "hand_in_danger",
+                    False,
+                )
+            )
+
+            feet_in_danger = bool(
+                person.get(
+                    "feet_in_danger",
+                    False,
+                )
+            )
+
+            # ----------------------------------------------------------
+            # DANGER
+            # ----------------------------------------------------------
+
+            if (
+                body_zone == cfg.ZONE_DANGER
+                or hand_zone == cfg.ZONE_DANGER
+                or hand_in_danger
+                or feet_in_danger
+            ):
+                danger_detected = True
+
+            # ----------------------------------------------------------
+            # WARNING
+            # ----------------------------------------------------------
+
+            elif (
+                body_zone == cfg.ZONE_WARNING
+                or hand_zone == cfg.ZONE_WARNING
+            ):
+                warning_detected = True
+
+            print(
+                "[HARDWARE DEBUG] "
+                "body_zone={} hand_zone={} "
+                "hand_in_danger={} feet_in_danger={}".format(
+                    body_zone,
+                    hand_zone,
+                    hand_in_danger,
+                    feet_in_danger,
+                )
+            )
+
+        # --------------------------------------------------------------
+        # DANGER HAS HIGHEST PRIORITY
+        # --------------------------------------------------------------
+
+        if danger_detected:
+
+            # Hold DANGER for 2 seconds.
+            # This prevents pose-detection flicker from immediately
+            # turning the physical alarm off.
+            self.hardware_danger_until = (
+                now + 2.0
+            )
+
+            self._set_hardware_state(
+                "DANGER"
+            )
+
+            print(
+                "[HARDWARE DEBUG] DANGER detected"
+            )
+
+            return
+
+        # --------------------------------------------------------------
+        # HOLD DANGER
+        # --------------------------------------------------------------
+
+        if now < self.hardware_danger_until:
+
+            self._set_hardware_state(
+                "DANGER"
+            )
+
+            return
+
+        # --------------------------------------------------------------
+        # WARNING
+        # --------------------------------------------------------------
+
+        if warning_detected:
+
+            self._set_hardware_state(
+                "WARNING"
+            )
+
+            print(
+                "[HARDWARE DEBUG] WARNING detected"
+            )
+
+            return
+
+        # --------------------------------------------------------------
+        # CLEAR
+        # --------------------------------------------------------------
+
+        self._set_hardware_state(
+            "CLEAR"
+        )
+
+    # ==================================================================
     # SETUP
     # ==================================================================
 
     def setup(self):
+        """Load models, open source, start web server and UI."""
 
         self.detector = PersonDetector(
             model_path=self.cfg.MODEL_PATH,
@@ -448,10 +627,8 @@ class ZoneXApp:
         )
 
         self._setup_web_server()
-
         self._open_log_session()
 
-        # Keep the OpenCV window for local debugging.
         cv2.namedWindow(
             self.cfg.WINDOW_NAME,
             cv2.WINDOW_NORMAL,
@@ -469,7 +646,6 @@ class ZoneXApp:
         )
 
         if self.schedule.enabled:
-
             print(
                 "[ZONE X] Processing target: {:.0f} FPS "
                 "(newest frame only; older frames are dropped by design)."
@@ -477,9 +653,7 @@ class ZoneXApp:
                     self.schedule.target_fps
                 )
             )
-
         else:
-
             print(
                 "[ZONE X] Processing every frame in order "
                 "(VIDEO_REALTIME = False)."
@@ -492,6 +666,7 @@ class ZoneXApp:
     # ==================================================================
 
     def _setup_web_server(self):
+        """Start the FastAPI server."""
 
         enabled = getattr(
             self.cfg,
@@ -500,11 +675,9 @@ class ZoneXApp:
         )
 
         if not enabled:
-
             print(
                 "[ZONE X] Web dashboard disabled."
             )
-
             return
 
         host = getattr(
@@ -541,20 +714,7 @@ class ZoneXApp:
     # ==================================================================
 
     def _handle_web_command(self, command, **kwargs):
-        """
-        Handle commands coming from the React dashboard.
-
-        IMPORTANT:
-
-        React does not create a second zone system.
-
-        Every command is routed into the SAME ZoneManager and state
-        used by the OpenCV window.
-        """
-
-        # --------------------------------------------------------------
-        # KEYBOARD
-        # --------------------------------------------------------------
+        """Handle commands from the React web dashboard."""
 
         if command == "key":
 
@@ -580,7 +740,6 @@ class ZoneXApp:
             }
 
             if key not in key_map:
-
                 return {
                     "handled": False,
                     "message": "Unknown key: {}".format(
@@ -588,8 +747,10 @@ class ZoneXApp:
                     ),
                 }
 
-            keep_running = self._apply_control_key(
-                key_map[key]
+            keep_running = (
+                self._apply_control_key(
+                    key_map[key]
+                )
             )
 
             return {
@@ -597,10 +758,6 @@ class ZoneXApp:
                 "keep_running": keep_running,
                 "message": self.zones.last_message,
             }
-
-        # --------------------------------------------------------------
-        # START ZONE
-        # --------------------------------------------------------------
 
         if command == "start_zone":
 
@@ -614,7 +771,6 @@ class ZoneXApp:
             )
 
             if zone_type not in self.zones.zone_types:
-
                 return {
                     "handled": False,
                     "message": "Unknown zone type",
@@ -625,7 +781,6 @@ class ZoneXApp:
             )
 
             self._forget_zone_state()
-
             self.paused = False
 
             return {
@@ -634,10 +789,6 @@ class ZoneXApp:
                 "zone_id": self.zones.defining_id,
                 "message": self.zones.last_message,
             }
-
-        # --------------------------------------------------------------
-        # ADD POINT
-        # --------------------------------------------------------------
 
         if command == "zone_point":
 
@@ -676,10 +827,6 @@ class ZoneXApp:
                 "message": self.zones.last_message,
             }
 
-        # --------------------------------------------------------------
-        # HOVER
-        # --------------------------------------------------------------
-
         if command == "zone_hover":
 
             x = int(
@@ -717,10 +864,6 @@ class ZoneXApp:
                 "message": self.zones.last_message,
             }
 
-        # --------------------------------------------------------------
-        # UNDO
-        # --------------------------------------------------------------
-
         if command == "zone_undo":
 
             self.zones.handle_mouse(
@@ -735,10 +878,6 @@ class ZoneXApp:
                 "handled": True,
                 "message": self.zones.last_message,
             }
-
-        # --------------------------------------------------------------
-        # FINISH
-        # --------------------------------------------------------------
 
         if command == "zone_finish":
 
@@ -778,10 +917,6 @@ class ZoneXApp:
                 "message": self.zones.last_message,
             }
 
-        # --------------------------------------------------------------
-        # CANCEL
-        # --------------------------------------------------------------
-
         if command == "zone_cancel":
 
             if self.zones.is_defining:
@@ -805,18 +940,11 @@ class ZoneXApp:
                 "message": "No zone is being defined.",
             }
 
-        # --------------------------------------------------------------
-        # CLEAR
-        # --------------------------------------------------------------
-
         if command == "clear":
 
             if self.zones.is_defining:
-
                 self.zones.cancel_definition()
-
             else:
-
                 self.zones.clear()
 
             self._forget_zone_state()
@@ -836,26 +964,13 @@ class ZoneXApp:
         }
 
     # ==================================================================
-    # APPLY OPEN-CV CONTROL KEY
+    # KEYBOARD CONTROL
     # ==================================================================
 
     def _apply_control_key(self, key):
-        """
-        The single implementation of keyboard behaviour.
-
-        Both:
-
-            OpenCV keyboard
-            React keyboard
-
-        reach this same function.
-        """
+        """Handle keyboard shortcuts."""
 
         cfg = self.cfg
-
-        # ==============================================================
-        # QUIT
-        # ==============================================================
 
         if key in (
             ord("q"),
@@ -871,21 +986,13 @@ class ZoneXApp:
 
             return False
 
-        # ==============================================================
-        # ZONE START
-        # ==============================================================
-
         zone_keys = {
-
             ord("s"): cfg.ZONE_SAFE,
             ord("S"): cfg.ZONE_SAFE,
-
             ord("w"): cfg.ZONE_WARNING,
             ord("W"): cfg.ZONE_WARNING,
-
             ord("d"): cfg.ZONE_DANGER,
             ord("D"): cfg.ZONE_DANGER,
-
             ord("r"): cfg.ZONE_DANGER,
             ord("R"): cfg.ZONE_DANGER,
         }
@@ -913,10 +1020,6 @@ class ZoneXApp:
             )
 
             return True
-
-        # ==============================================================
-        # CLEAR / CANCEL
-        # ==============================================================
 
         if key in (
             ord("c"),
@@ -949,10 +1052,6 @@ class ZoneXApp:
 
             return True
 
-        # ==============================================================
-        # MACHINE
-        # ==============================================================
-
         if key in (
             ord("m"),
             ord("M"),
@@ -979,10 +1078,6 @@ class ZoneXApp:
             )
 
             return True
-
-        # ==============================================================
-        # PAUSE
-        # ==============================================================
 
         if key in (
             ord("p"),
@@ -1011,10 +1106,6 @@ class ZoneXApp:
                 )
 
             return True
-
-        # ==============================================================
-        # ENTER
-        # ==============================================================
 
         if key in KEY_ENTER:
 
@@ -1054,10 +1145,11 @@ class ZoneXApp:
         return True
 
     # ==================================================================
-    # POSE
+    # POSE DETECTION
     # ==================================================================
 
     def _setup_pose(self):
+        """Load the hand/wrist detection model."""
 
         if not self.cfg.ENABLE_POSE:
 
@@ -1126,10 +1218,11 @@ class ZoneXApp:
             )
 
     # ==================================================================
-    # LOG SESSION
+    # LOGGING SESSION
     # ==================================================================
 
     def _open_log_session(self):
+        """Start a new logging session."""
 
         if not self.cfg.ENABLE_JSON_LOGGING:
             return
@@ -1173,7 +1266,6 @@ class ZoneXApp:
         )
 
         if events_path:
-
             print(
                 "[ZONE X] Logging events to {}".format(
                     events_path
@@ -1185,6 +1277,37 @@ class ZoneXApp:
     # ==================================================================
 
     def cleanup(self):
+        """Clean up everything before shutting down."""
+
+        # --------------------------------------------------------------
+        # CLEAR ESP32 HARDWARE
+        # --------------------------------------------------------------
+
+        if self.mqtt is not None:
+
+            try:
+
+                self.mqtt.clear()
+
+                self.hardware_zone_state = "CLEAR"
+                self.hardware_alarm_state = False
+
+                print(
+                    "[HARDWARE] ESP32 cleared."
+                )
+
+            except Exception as exc:
+
+                print(
+                    "[HARDWARE] Failed to clear ESP32: {}".format(
+                        exc
+                    ),
+                    file=sys.stderr,
+                )
+
+        # --------------------------------------------------------------
+        # STOP PC ALARM
+        # --------------------------------------------------------------
 
         try:
 
@@ -1199,12 +1322,22 @@ class ZoneXApp:
                 file=sys.stderr,
             )
 
-        # Cleanup MQTT
+        # --------------------------------------------------------------
+        # DISCONNECT MQTT
+        # --------------------------------------------------------------
+
         if self.mqtt is not None:
+
             try:
+
                 self.mqtt.disconnect()
-                print("[ZONE X] MQTT disconnected")
+
+                print(
+                    "[ZONE X] MQTT disconnected"
+                )
+
             except Exception as exc:
+
                 print(
                     "[ZONE X] MQTT cleanup error: {}".format(
                         exc
@@ -1212,10 +1345,13 @@ class ZoneXApp:
                     file=sys.stderr,
                 )
 
+        # --------------------------------------------------------------
+        # WEB SERVER
+        # --------------------------------------------------------------
+
         if self.web_server is not None:
 
             try:
-
                 self.web_server.stop()
 
             except Exception as exc:
@@ -1231,6 +1367,10 @@ class ZoneXApp:
 
                 self.web_server = None
 
+        # --------------------------------------------------------------
+        # EVENT LOG
+        # --------------------------------------------------------------
+
         try:
 
             self.events.close_session()
@@ -1243,6 +1383,10 @@ class ZoneXApp:
                 ),
                 file=sys.stderr,
             )
+
+        # --------------------------------------------------------------
+        # CAMERA
+        # --------------------------------------------------------------
 
         if self.source is not None:
 
@@ -1263,16 +1407,18 @@ class ZoneXApp:
 
                 self.source = None
 
+        # --------------------------------------------------------------
+        # OPENCV
+        # --------------------------------------------------------------
+
         try:
 
             cv2.destroyAllWindows()
 
             for _ in range(3):
-
                 cv2.waitKey(1)
 
         except cv2.error:
-
             pass
 
     # ==================================================================
@@ -1280,9 +1426,9 @@ class ZoneXApp:
     # ==================================================================
 
     def run(self):
+        """Main processing loop."""
 
         self.running = True
-
         empty_frame_count = 0
 
         while self.running:
@@ -1338,7 +1484,9 @@ class ZoneXApp:
 
                 if self.last_frame is not None:
 
-                    frame = self.last_frame.copy()
+                    frame = (
+                        self.last_frame.copy()
+                    )
 
                     self.render(frame)
 
@@ -1351,17 +1499,8 @@ class ZoneXApp:
                         frame
                     )
 
-            # ----------------------------------------------------------
-            # OpenCV keyboard
-            # ----------------------------------------------------------
-
             if self._handle_keys() is False:
-
                 break
-
-            # ----------------------------------------------------------
-            # OpenCV window close
-            # ----------------------------------------------------------
 
             if self._window_closed():
 
@@ -1376,13 +1515,13 @@ class ZoneXApp:
         self.running = False
 
     # ==================================================================
-    # SOURCE
+    # FRAME SOURCE HELPERS
     # ==================================================================
 
     def _source_finished(self):
+        """Check if video has ended."""
 
         if not self.source.ended:
-
             return False
 
         print(
@@ -1395,6 +1534,7 @@ class ZoneXApp:
         self,
         empty_frame_count,
     ):
+        """Handle a frame read failure."""
 
         if self.source.uses_reader_thread:
 
@@ -1445,11 +1585,8 @@ class ZoneXApp:
 
         return True
 
-    # ==================================================================
-    # IDLE
-    # ==================================================================
-
     def _idle(self):
+        """Wait briefly when processing isn't due yet."""
 
         remaining = (
             self.schedule.seconds_until_due()
@@ -1465,10 +1602,11 @@ class ZoneXApp:
             )
 
     # ==================================================================
-    # STATS
+    # STATISTICS
     # ==================================================================
 
     def _maybe_print_stats(self):
+        """Print performance statistics."""
 
         interval = getattr(
             self.cfg,
@@ -1477,7 +1615,6 @@ class ZoneXApp:
         )
 
         if interval <= 0:
-
             return
 
         now = time.monotonic()
@@ -1486,7 +1623,6 @@ class ZoneXApp:
             now - self._last_stats_print
             < interval
         ):
-
             return
 
         self._last_stats_print = now
@@ -1496,12 +1632,21 @@ class ZoneXApp:
         )
 
     # ==================================================================
-    # FRAME PROCESSING
+    # PROCESS ONE FRAME
     # ==================================================================
 
     def process_frame(self, frame):
+        """
+        Process one image frame.
+
+        Existing Vision logic is preserved.
+        """
 
         cfg = self.cfg
+
+        # ==============================================================
+        # FRAME SIZE
+        # ==============================================================
 
         height, width = frame.shape[:2]
 
@@ -1513,7 +1658,7 @@ class ZoneXApp:
         self.frame_index += 1
 
         # ==============================================================
-        # DETECTION
+        # 1. PERSON DETECTION
         # ==============================================================
 
         detections = self.detector.detect(
@@ -1521,7 +1666,7 @@ class ZoneXApp:
         )
 
         # ==============================================================
-        # TRACKING
+        # 2. PERSON TRACKING
         # ==============================================================
 
         self.people = self.tracker.update(
@@ -1530,7 +1675,7 @@ class ZoneXApp:
         )
 
         # ==============================================================
-        # POSE
+        # 3. HAND / FOOT DETECTION
         # ==============================================================
 
         self._update_hand_state(
@@ -1538,7 +1683,7 @@ class ZoneXApp:
         )
 
         # ==============================================================
-        # RISK
+        # 4. RISK CALCULATION
         # ==============================================================
 
         self.risks = {
@@ -1550,12 +1695,22 @@ class ZoneXApp:
             for person in self.people
         }
 
+        # ==============================================================
+        # 4.5 ESP32 HARDWARE
+        # ==============================================================
+
+        self._update_hardware()
+
+        # ==============================================================
+        # 5. HIGHEST RISK
+        # ==============================================================
+
         self.worst_id, self.worst = (
             self._worst_risk()
         )
 
         # ==============================================================
-        # EVENT LOG
+        # 6. EVENTS
         # ==============================================================
 
         self.events.update(
@@ -1570,21 +1725,23 @@ class ZoneXApp:
         )
 
         # ==============================================================
-        # ALARM
+        # 7. EXISTING PC ALARM
         # ==============================================================
 
         self._update_alarm()
 
         # ==============================================================
-        # ALERT TIMING
+        # 8. ALERT TIMING
         # ==============================================================
 
         now = time.time()
 
         if any(
-            person["zone"]
+            person.get("zone")
             == cfg.ZONE_DANGER
-            or person["hand_in_danger"]
+            or person.get(
+                "hand_in_danger"
+            )
             for person in self.people
         ):
 
@@ -1600,23 +1757,15 @@ class ZoneXApp:
             self.last_critical_time = now
 
         # ==============================================================
-        # FINAL RENDER
+        # 9. RENDER
         # ==============================================================
 
         self.render(frame)
-
-        # ==============================================================
-        # LOCAL OPENCV WINDOW
-        # ==============================================================
 
         cv2.imshow(
             self.cfg.WINDOW_NAME,
             frame,
         )
-
-        # ==============================================================
-        # WEB DASHBOARD
-        # ==============================================================
 
         self._publish_frame(
             frame
@@ -1627,9 +1776,9 @@ class ZoneXApp:
     # ==================================================================
 
     def _publish_frame(self, frame):
+        """Send frame to web browsers."""
 
         if self.web_server is None:
-
             return
 
         try:
@@ -1648,16 +1797,13 @@ class ZoneXApp:
             )
 
     # ==================================================================
-    # HAND STATE
+    # HAND / FOOT STATE UPDATE
     # ==================================================================
 
     def _update_hand_state(self, frame):
+        """Update wrist and foot state from pose model."""
 
-        if (
-            self.pose is None
-            or not self.people
-        ):
-
+        if self.pose is None or not self.people:
             return
 
         every = max(
@@ -1667,26 +1813,87 @@ class ZoneXApp:
             ),
         )
 
-        if (
-            self.frame_index % every
-            != 0
-        ):
-
+        if self.frame_index % every != 0:
             return
 
         from src.pose.pose_detector import (
-            associate_wrists,
+            associate_keypoints,
         )
 
         poses = self.pose.detect(
             frame
         )
 
-        wrist_map = associate_wrists(
+        keypoint_map = associate_keypoints(
             self.people,
             poses,
             self.cfg.POSE_MATCH_MIN_IOU,
         )
+
+        # --------------------------------------------------------------
+        # FEET
+        # --------------------------------------------------------------
+
+        for person in self.people:
+
+            person_id = person["id"]
+
+            if person_id in keypoint_map:
+
+                keypoints = (
+                    keypoint_map[
+                        person_id
+                    ]
+                )
+
+                person["feet"] = (
+                    keypoints.get(
+                        "feet",
+                        [],
+                    )
+                )
+
+                feet_in_danger = False
+
+                for foot_x, foot_y in (
+                    person["feet"]
+                ):
+
+                    zone_type, _ = (
+                        self.zones.get_zone_at(
+                            foot_x,
+                            foot_y,
+                        )
+                    )
+
+                    if (
+                        zone_type
+                        == self.cfg.ZONE_DANGER
+                    ):
+
+                        feet_in_danger = True
+                        break
+
+                person["feet_in_danger"] = (
+                    feet_in_danger
+                )
+
+        # --------------------------------------------------------------
+        # WRISTS
+        # --------------------------------------------------------------
+
+        wrist_map = {}
+
+        for person_id, keypoints in (
+            keypoint_map.items()
+        ):
+
+            wrist_map[person_id] = (
+                keypoints.get(
+                    "wrists",
+                    [],
+                )
+            )
 
         self.tracker.update_hands(
             self.people,
@@ -1695,10 +1902,17 @@ class ZoneXApp:
         )
 
     # ==================================================================
-    # CRITICAL
+    # CHECK CRITICAL
     # ==================================================================
 
     def _is_critical(self, person):
+        """
+        A person is critical when:
+
+        - body is in danger
+        - hand is in danger
+        - feet are in danger
+        """
 
         return (
             person.get("zone")
@@ -1708,24 +1922,51 @@ class ZoneXApp:
                     "hand_in_danger"
                 )
             )
+            or bool(
+                person.get(
+                    "feet_in_danger"
+                )
+            )
         )
 
     # ==================================================================
     # ALARM OFFENDERS
     # ==================================================================
 
-    def _alarm_offenders(
-        self,
-        dwelling,
-    ):
+    def _alarm_offenders(self, dwelling):
+        """
+        Existing PC-alarm offender logic.
+        """
 
         offenders = [
             person
             for person in self.people
-            if self._is_critical(
-                person
+            if self._is_critical(person)
+        ]
+
+        warning_threshold = getattr(
+            self.cfg,
+            "WARNING_ALARM_THRESHOLD_SEC",
+            self.cfg.WARNING_DWELL_THRESHOLD_SEC,
+        )
+
+        warning_offenders = [
+            person
+            for person in self.people
+            if (
+                person.get("zone")
+                == self.cfg.ZONE_WARNING
+                and person.get(
+                    "warning_duration",
+                    0,
+                )
+                >= warning_threshold
             )
         ]
+
+        offenders.extend(
+            warning_offenders
+        )
 
         claimed = {
             person["id"]
@@ -1735,7 +1976,6 @@ class ZoneXApp:
         for incident in dwelling:
 
             if incident.track_id in claimed:
-
                 continue
 
             claimed.add(
@@ -1763,13 +2003,19 @@ class ZoneXApp:
         return offenders
 
     # ==================================================================
-    # ALARM
+    # UPDATE PC ALARM ONLY
     # ==================================================================
 
     def _update_alarm(self):
+        """
+        Update the existing PC alarm and event logging.
+
+        IMPORTANT:
+        ESP32 hardware is NOT controlled here.
+        _update_hardware() is the only ESP32 controller.
+        """
 
         if not self.cfg.ENABLE_PC_ALARM:
-
             return
 
         dwelling = (
@@ -1784,11 +2030,9 @@ class ZoneXApp:
             )
         )
 
-        alarm_should_be_active = bool(offenders)
-
-        # --------------------------------------------------------------
-        # Existing PC alarm behavior
-        # --------------------------------------------------------------
+        alarm_should_be_active = bool(
+            offenders
+        )
 
         if alarm_should_be_active:
 
@@ -1798,22 +2042,9 @@ class ZoneXApp:
 
             self.alarm.stop_alarm()
 
-        # --------------------------------------------------------------
-        # MQTT hardware alarm
-        # --------------------------------------------------------------
-
-        if alarm_should_be_active:
-
-            self._mqtt_alarm_on(offenders)
-
-        else:
-
-            self._mqtt_alarm_off()
-
         if self.alarm.is_alarm_active():
 
             for incident in dwelling:
-
                 incident.alarm_triggered = True
 
         self.events.update_alarm(
@@ -1825,37 +2056,35 @@ class ZoneXApp:
         )
 
     # ==================================================================
-    # PERSON
+    # FIND PERSON
     # ==================================================================
 
     def _person(self, track_id):
+        """Find a person by tracking ID."""
 
         if track_id is None:
-
             return None
 
         for person in self.people:
 
             if person["id"] == track_id:
-
                 return person
 
         return None
 
     # ==================================================================
-    # WORST RISK
+    # FIND WORST RISK
     # ==================================================================
 
     def _worst_risk(self):
+        """Find the person with the highest risk score."""
 
         worst_id = None
-
         worst = None
 
-        for (
-            person_id,
-            verdict,
-        ) in self.risks.items():
+        for person_id, verdict in (
+            self.risks.items()
+        ):
 
             if (
                 worst is None
@@ -1864,19 +2093,19 @@ class ZoneXApp:
             ):
 
                 worst_id = person_id
-
                 worst = verdict
 
-        return (
-            worst_id,
-            worst,
-        )
+        return worst_id, worst
+
+    # ==================================================================
+    # HIGHEST RISK
+    # ==================================================================
 
     @property
     def highest_risk(self):
+        """Return the highest risk score."""
 
         if self.worst is None:
-
             return 0
 
         return self.worst["risk"]
@@ -1886,6 +2115,7 @@ class ZoneXApp:
     # ==================================================================
 
     def _zone_counts(self):
+        """Count people in each zone."""
 
         counts = {}
 
@@ -1910,11 +2140,11 @@ class ZoneXApp:
     # ==================================================================
 
     def render(self, frame):
+        """Draw all visual elements."""
 
         cfg = self.cfg
 
         counts = self._zone_counts()
-
         now = time.time()
 
         alert_active = (
@@ -1946,9 +2176,7 @@ class ZoneXApp:
                 cfg.ZONE_DANGER,
             ):
 
-                if person.get(
-                    "zone_id"
-                ):
+                if person.get("zone_id"):
 
                     violated_ids.add(
                         person["zone_id"]
@@ -2112,7 +2340,7 @@ class ZoneXApp:
             )
 
     # ==================================================================
-    # STATUS
+    # CURRENT STATUS
     # ==================================================================
 
     def _current_status(
@@ -2120,27 +2348,23 @@ class ZoneXApp:
         alert_active,
         critical_active,
     ):
+        """Determine current system status."""
 
         cfg = self.cfg
 
         if self.paused:
-
             return "PAUSED"
 
         if self.zones.is_defining:
-
             return "DEFINING"
 
         if not self.zones.any_ready:
-
             return "NO_ZONE"
 
         if critical_active:
-
             return "CRITICAL"
 
         if alert_active:
-
             return "DANGER"
 
         if any(
@@ -2161,9 +2385,9 @@ class ZoneXApp:
         self,
         status,
     ):
+        """Return custom banner text."""
 
         if status != "DEFINING":
-
             return None
 
         zone_type = (
@@ -2181,11 +2405,12 @@ class ZoneXApp:
         )
 
     # ==================================================================
-    # EVENT PRINT
+    # PRINT EVENT
     # ==================================================================
 
     @staticmethod
     def _print_event(record):
+        """Print event."""
 
         who = (
             record.get(
@@ -2261,6 +2486,7 @@ class ZoneXApp:
     # ==================================================================
 
     def _window_closed(self):
+        """Check whether OpenCV window is closed."""
 
         try:
 
@@ -2276,11 +2502,8 @@ class ZoneXApp:
 
             return True
 
-    # ==================================================================
-    # OPENCV KEYBOARD
-    # ==================================================================
-
     def _handle_keys(self):
+        """Check keyboard input."""
 
         key = (
             cv2.waitKey(1)
@@ -2288,7 +2511,6 @@ class ZoneXApp:
         )
 
         if key == 255:
-
             return True
 
         return self._apply_control_key(
@@ -2296,114 +2518,101 @@ class ZoneXApp:
         )
 
     # ==================================================================
-    # FORGET ZONE STATE
+    # RESET STATE WHEN ZONES CHANGE
     # ==================================================================
 
     def _forget_zone_state(self):
+        """
+        Reset tracking/risk/event state when zones change.
+        """
 
         self.tracker.reset()
-
         self.events.reset()
 
         self.risks = {}
 
         self.worst_id = None
-
         self.worst = None
 
         self.last_violation_time = 0.0
-
         self.last_critical_time = 0.0
+
+        # Reset hardware state tracking.
+        self.hardware_zone_state = None
+
+        # Reset danger hold timer.
+        self.hardware_danger_until = 0.0
 
 
 def print_controls():
+    """Print keyboard shortcut guide."""
 
     print("")
-
     print(
         "  ------------------------------------------------------------"
     )
-
     print(
-        "   ZONE X - Smart Safety Monitoring System"
+        "   ZONE X - sentinel factory safety monitoring"
     )
-
     print(
         "  ------------------------------------------------------------"
     )
-
     print(
         "   s      add a SAFE zone"
     )
-
     print(
         "   w      add a WARNING zone"
     )
-
     print(
         "   d      add a DANGER zone"
     )
-
     print(
         "   r      add a DANGER zone"
     )
-
     print(
         "   click  add a polygon point"
     )
-
     print(
         "   Enter  finish the polygon"
     )
-
     print(
         "   c      clear all zones"
     )
-
     print(
         "   m      toggle simulated machine ON / OFF"
     )
-
     print(
         "   p      pause / resume"
     )
-
     print(
         "   q      quit"
     )
-
     print(
         "   Esc    quit"
     )
-
     print(
         "  ------------------------------------------------------------"
     )
-
     print(
         "   Draw DANGER around each machine,"
     )
-
     print(
         "   WARNING around the danger area,"
     )
-
     print(
         "   and SAFE over the walkway."
     )
-
     print(
         "   Each polygon receives its own tag."
     )
-
     print(
         "  ------------------------------------------------------------"
     )
-
     print("")
 
 
 def main():
+    """Program entry point."""
 
     project_root = os.path.dirname(
         os.path.abspath(
@@ -2416,42 +2625,99 @@ def main():
     )
 
     # ==============================================================
-    # SHOW GUI SOURCE SELECTOR BEFORE STARTING
+    # SOURCE SELECTOR
     # ==============================================================
-    
-    # Check if we should show the selector
-    # Skip if environment variable is set or if command-line args are present
+
     show_selector = True
-    
-    # Check for command-line arguments that might indicate we should skip the GUI
+
     if len(sys.argv) > 1:
-        # If user provided any command-line arguments, skip the GUI selector
-        # This allows headless/automated use
         show_selector = False
-    
-    # Check environment variable to skip selector
-    if os.environ.get("ZONE_SKIP_SELECTOR", "").lower() == "true":
+
+    if (
+        os.environ.get(
+            "ZONE_SKIP_SELECTOR",
+            "",
+        ).lower()
+        == "true"
+    ):
         show_selector = False
-    
+
     if show_selector:
+
         try:
-            print("\n[ZONE X] Opening source selector...")
-            selection_made = config.show_source_selector()
-            
+
+            print(
+                "\n[ZONE X] Opening source selector..."
+            )
+
+            selection_made = (
+                config.show_source_selector()
+            )
+
             if selection_made:
-                print(f"[ZONE X] Source selected: {config.SOURCE_TYPE}")
-                if config.SOURCE_TYPE == "webcam":
-                    print(f"[ZONE X] Camera index: {config.CAMERA_INDEX}")
-                elif config.SOURCE_TYPE in ["ip", "cctv"]:
-                    print(f"[ZONE X] URL: {config.SOURCE_URL}")
-                elif config.SOURCE_TYPE == "video":
-                    print(f"[ZONE X] Video path: {config.VIDEO_PATH}")
+
+                print(
+                    "[ZONE X] Source selected: {}".format(
+                        config.SOURCE_TYPE
+                    )
+                )
+
+                if (
+                    config.SOURCE_TYPE
+                    == "webcam"
+                ):
+
+                    print(
+                        "[ZONE X] Camera index: {}".format(
+                            config.CAMERA_INDEX
+                        )
+                    )
+
+                elif config.SOURCE_TYPE in [
+                    "ip",
+                    "cctv",
+                ]:
+
+                    print(
+                        "[ZONE X] URL: {}".format(
+                            config.SOURCE_URL
+                        )
+                    )
+
+                elif (
+                    config.SOURCE_TYPE
+                    == "video"
+                ):
+
+                    print(
+                        "[ZONE X] Video path: {}".format(
+                            config.VIDEO_PATH
+                        )
+                    )
+
             else:
-                print("[ZONE X] Using default source: webcam (camera 0)")
-        except Exception as e:
-            print(f"[ZONE X] Error showing source selector: {e}")
-            print("[ZONE X] Continuing with default webcam source...")
-    
+
+                print(
+                    "[ZONE X] Using default source: "
+                    "webcam (camera 0)"
+                )
+
+        except Exception as exc:
+
+            print(
+                "[ZONE X] Error showing source selector: {}".format(
+                    exc
+                )
+            )
+
+            print(
+                "[ZONE X] Continuing with default webcam source..."
+            )
+
+    # ==============================================================
+    # CREATE APP
+    # ==============================================================
+
     app = ZoneXApp(
         config
     )
@@ -2461,7 +2727,6 @@ def main():
     try:
 
         app.setup()
-
         app.run()
 
     except ModelLoadError as exc:
@@ -2518,7 +2783,6 @@ def main():
 
 
 if __name__ == "__main__":
-
     sys.exit(
         main()
     )

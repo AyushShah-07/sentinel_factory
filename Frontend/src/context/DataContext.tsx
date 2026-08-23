@@ -1,8 +1,14 @@
+// =========================================================
+// IMPORTS - FIXED
+// =========================================================
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { AlertRecord, EventRecord } from '../types'
 import { fetchAlerts } from '../services/alertService'
 import { fetchEvents } from '../services/eventService'
 
+// =========================================================
+// CONTEXT TYPE DEFINITION
+// =========================================================
 interface DataContextValue {
   events: EventRecord[]
   alerts: AlertRecord[]
@@ -14,9 +20,16 @@ interface DataContextValue {
   reloadData: () => void
 }
 
+// =========================================================
+// CREATE CONTEXT
+// =========================================================
 const DataContext = createContext<DataContextValue | undefined>(undefined)
 
+// =========================================================
+// DATA PROVIDER COMPONENT
+// =========================================================
 export const DataProvider = ({ children }: { children: React.ReactNode }) => {
+  // State for events and alerts
   const [events, setEvents] = useState<EventRecord[]>([])
   const [alerts, setAlerts] = useState<AlertRecord[]>([])
   const [loadingEvents, setLoadingEvents] = useState(true)
@@ -25,20 +38,30 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
   const [errorAlerts, setErrorAlerts] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
 
+  // =========================================================
+  // FETCH DATA FROM BACKEND
+  // =========================================================
   const loadAll = async () => {
     setLoadingEvents(true)
     setLoadingAlerts(true)
     setErrorEvents(null)
     setErrorAlerts(null)
 
-    const [eventsResult, alertsResult] = await Promise.allSettled([fetchEvents(), fetchAlerts()])
+    // Fetch both events and alerts in parallel
+    const [eventsResult, alertsResult] = await Promise.allSettled([
+      fetchEvents(),
+      fetchAlerts()
+    ])
 
     const devFallback = Boolean((import.meta as any).env?.DEV)
 
+    // =========================================================
+    // HANDLE EVENTS RESPONSE
+    // =========================================================
     if (eventsResult.status === 'fulfilled') {
       setEvents(eventsResult.value)
     } else if (devFallback) {
-      // use sample data in dev and do not treat as fatal error
+      // Sample data for development when backend is not available
       setEvents([
         {
           id: 1,
@@ -70,21 +93,37 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
       setErrorEvents('Unable to load events.')
     }
 
+    // =========================================================
+    // HANDLE ALERTS RESPONSE
+    // =========================================================
     if (alertsResult.status === 'fulfilled') {
       setAlerts(alertsResult.value)
     } else if (devFallback) {
+      // ✅ UPDATED: Sample alert with new fields (matches Alert.java)
       setAlerts([
         {
           id: 101,
-          alertType: 'PROXIMITY',
-          severity: 'warning',
-          status: 'active',
-          message: 'Worker near hazardous area',
+          eventId: 'YOLO-123456',
+          personId: 'P1',
+          zoneName: 'DANGER_1',        // ✅ From JSON - zone_name
+          incidentType: 'DANGER',      // ✅ From JSON - incident_type
+          picture: '',                 // From JSON - picture_url (empty for sample)
+          dwellSeconds: 0,             // ✅ From JSON - dwell_seconds
           timestamp: new Date().toISOString(),
-          eventId: 1,
           cameraId: 'CAM-DEV-01',
-          zone: 'DANGER',
-          riskScore: 0.88,
+          status: 'ACTIVE',
+        },
+        {
+          id: 102,
+          eventId: 'YOLO-123457',
+          personId: 'P2',
+          zoneName: 'WARNING_1',       // ✅ From JSON - zone_name
+          incidentType: 'WARNING',     // ✅ From JSON - incident_type
+          picture: '',                 // From JSON - picture_url (empty for sample)
+          dwellSeconds: 5.2,           // ✅ From JSON - dwell_seconds
+          timestamp: new Date().toISOString(),
+          cameraId: 'CAM-DEV-02',
+          status: 'ACTIVE',
         },
       ])
       setErrorAlerts(null)
@@ -92,6 +131,7 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
       setErrorAlerts('Unable to load alerts.')
     }
 
+    // Update last updated timestamp
     if (eventsResult.status === 'fulfilled' || alertsResult.status === 'fulfilled') {
       setLastUpdated(new Date().toISOString())
     }
@@ -100,12 +140,18 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
     setLoadingAlerts(false)
   }
 
+  // =========================================================
+  // AUTO-REFRESH EVERY 5 SECONDS
+  // =========================================================
   useEffect(() => {
     loadAll()
     const interval = window.setInterval(loadAll, 5000)
     return () => window.clearInterval(interval)
   }, [])
 
+  // =========================================================
+  // CONTEXT VALUE
+  // =========================================================
   const value = useMemo(
     () => ({
       events,
@@ -123,6 +169,9 @@ export const DataProvider = ({ children }: { children: React.ReactNode }) => {
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>
 }
 
+// =========================================================
+// USE DATA HOOK
+// =========================================================
 export const useData = () => {
   const context = useContext(DataContext)
   if (!context) {

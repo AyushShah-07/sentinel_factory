@@ -6,17 +6,14 @@ import { EmptyState } from '../components/common/EmptyState'
 import { AlertDetailDrawer } from '../components/alerts/AlertDetailDrawer'
 import type { AlertRecord } from '../types'
 
+// ✅ UPDATED: Only JSON fields + Picture
 const alertHeaders = [
-  'Alert ID',
-  'Event ID',
-  'Type',
-  'Person',
-  'Severity',
-  'Camera',
-  'Zone',
-  'Dwell',
-  'Picture',
-  'Status',
+  'Alert ID',    // Database primary key
+  'Type',        // From JSON - incident_type
+  'Person',      // From JSON - person_id
+  'Zone',        // From JSON - zone_name
+  'Dwell',       // From JSON - dwell_seconds
+  'Picture',     // From JSON - picture_url
 ]
 
 export const Alerts = () => {
@@ -31,22 +28,17 @@ export const Alerts = () => {
   const [selectedAlert, setSelectedAlert] =
     useState<AlertRecord | null>(null)
 
+  // Filter alerts based on search query
   const filtered = useMemo(() => {
     const query = search.toLowerCase()
 
     return alerts.filter((alert) =>
       [
         alert.id.toString(),
-        alert.eventId,
-        alert.alertType,
-        alert.incidentName,
+        alert.incidentType,
         alert.personId,
-        alert.severity,
-        alert.cameraId,
-        alert.zone,
-        alert.bodyZoneId,
-        alert.handZoneId,
-        alert.status,
+        alert.zoneName,
+        alert.dwellSeconds?.toString(),
       ]
         .filter(Boolean)
         .some((value) =>
@@ -54,15 +46,15 @@ export const Alerts = () => {
             .toString()
             .toLowerCase()
             .includes(query),
-        ),
+        )
     )
   }, [alerts, search])
 
+  // Get image URL from backend - UNCHANGED
   const getImageUrl = (alert: AlertRecord) => {
     if (!alert.picture) {
       return null
     }
-
     return `http://localhost:8080/api/alerts/${alert.id}/image`
   }
 
@@ -71,18 +63,13 @@ export const Alerts = () => {
       <div className="page__header">
         <div>
           <h2>Alerts</h2>
-
           <p>
             Danger incidents and warning-zone dwell incidents
             recorded by the backend.
           </p>
         </div>
-
         <div className="page__actions">
-          <button
-            type="button"
-            onClick={reload}
-          >
+          <button type="button" onClick={reload}>
             Refresh
           </button>
         </div>
@@ -91,21 +78,16 @@ export const Alerts = () => {
       <div className="table-toolbar">
         <input
           type="search"
-          placeholder="Search person, camera, zone, severity..."
+          placeholder="Search person, zone, type..."
           value={search}
-          onChange={(event) =>
-            setSearch(event.target.value)
-          }
+          onChange={(event) => setSearch(event.target.value)}
         />
       </div>
 
       {loading ? (
         <LoadingState message="Loading alerts..." />
       ) : error ? (
-        <ErrorState
-          message={error}
-          onRetry={reload}
-        />
+        <ErrorState message={error} onRetry={reload} />
       ) : filtered.length === 0 ? (
         <EmptyState message="No safety alerts." />
       ) : (
@@ -118,7 +100,6 @@ export const Alerts = () => {
                 ))}
               </tr>
             </thead>
-
             <tbody>
               {filtered.map((alert) => {
                 const imageUrl = getImageUrl(alert)
@@ -126,47 +107,29 @@ export const Alerts = () => {
                 return (
                   <tr
                     key={alert.id}
-                    onClick={() =>
-                      setSelectedAlert(alert)
-                    }
-                    style={{
-                      cursor: 'pointer',
-                    }}
+                    onClick={() => setSelectedAlert(alert)}
+                    style={{ cursor: 'pointer' }}
                   >
+                    {/* Alert ID - from database */}
                     <td>{alert.id}</td>
 
-                    <td>
-                      {alert.eventId ?? 'Unknown'}
-                    </td>
+                    {/* Type - from JSON incident_type */}
+                    <td>{alert.incidentType ?? 'Unknown'}</td>
 
-                    <td>
-                      {alert.alertType ?? 'Unknown'}
-                    </td>
+                    {/* Person - from JSON person_id */}
+                    <td>{alert.personId ?? 'Unknown'}</td>
 
-                    <td>
-                      {alert.personId ?? 'Unknown'}
-                    </td>
+                    {/* Zone - from JSON zone_name */}
+                    <td>{alert.zoneName ?? 'Unknown'}</td>
 
-                    <td>
-                      {alert.severity ?? 'Unknown'}
-                    </td>
-
-                    <td>
-                      {alert.cameraId ?? 'Unknown'}
-                    </td>
-
-                    <td>
-                      {alert.zone ??
-                        alert.bodyZoneId ??
-                        'Unknown'}
-                    </td>
-
+                    {/* Dwell - from JSON dwell_seconds */}
                     <td>
                       {alert.dwellSeconds != null
                         ? `${alert.dwellSeconds}s`
                         : '--'}
                     </td>
 
+                    {/* Picture - from JSON picture_url - UNCHANGED */}
                     <td>
                       {imageUrl ? (
                         <img
@@ -190,10 +153,6 @@ export const Alerts = () => {
                         'No image'
                       )}
                     </td>
-
-                    <td>
-                      {alert.status ?? 'Unknown'}
-                    </td>
                   </tr>
                 )
               })}
@@ -205,9 +164,7 @@ export const Alerts = () => {
       {selectedAlert ? (
         <AlertDetailDrawer
           alert={selectedAlert}
-          onClose={() =>
-            setSelectedAlert(null)
-          }
+          onClose={() => setSelectedAlert(null)}
         />
       ) : null}
     </main>

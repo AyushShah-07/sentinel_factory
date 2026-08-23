@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sentinel Factory - Safety Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .container {
+            width: 400px;
+            height: 600px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .header h2 {
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f9f9f9;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 12px;
+            border-radius: 10px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        
+        .user-message {
+            background: #3498db;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+        
+        .bot-message {
+            background: white;
+            border: 1px solid #e0e0e0;
+            margin-right: auto;
+        }
+        
+        .loading {
+            background: #f0f0f0;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .quick-questions {
+            padding: 10px;
+            background: #ecf0f1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            justify-content: center;
+        }
+        
+        .quick-btn {
+            padding: 8px 12px;
+            background: white;
+            border: 1px solid #bdc3c7;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.3s;
+        }
+        
+        .quick-btn:hover {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        
+        .input-area {
+            padding: 15px;
+            background: white;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+        }
+        
+        input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 14px;
+            outline: none;
+        }
+        
+        input:focus {
+            border-color: #3498db;
+        }
+        
+        button {
+            padding: 12px 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            background: #2980b9;
+        }
+        
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            padding: 5px;
+            text-align: center;
+            font-size: 11px;
+            color: #666;
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>🚨 Safety Assistant</h2>
+            <p>Sentinel Factory Monitoring System</p>
+        </div>
+        
+        <div class="status" id="status">
+            Checking API connection...
+        </div>
+        
+        <div class="messages" id="messages">
+            <div class="message bot-message">
+                👋 Hello! I can answer questions about your safety monitoring data.
+            </div>
+        </div>
+        
+        <div class="quick-questions">
+            <button class="quick-btn" onclick="quickAsk('How many danger incidents?')">Danger Incidents</button>
+            <button class="quick-btn" onclick="quickAsk('Who is in danger zone?')">Danger Zone</button>
+            <button class="quick-btn" onclick="quickAsk('Show all incidents')">All Incidents</button>
+            <button class="quick-btn" onclick="quickAsk('What is the dwell time?')">Dwell Time</button>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="question" placeholder="Ask about incidents..." onkeypress="if(event.key==='Enter') sendMessage()">
+            <button onclick="sendMessage()" id="sendBtn">Ask</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8001';
+        
+        // Check API connection on load
+        async function checkConnection() {
+            const status = document.getElementById('status');
+            try {
+                const response = await fetch(`${API_URL}/status`, { timeout: 3000 });
+                if (response.ok) {
+                    status.innerHTML = '✅ Connected to RAG Agent asjad';
+                    status.style.color = 'green';
+                } else {
+                    status.innerHTML = '❌ API Error';
+                    status.style.color = 'red';
+                }
+            } catch (error) {
+                status.innerHTML = '❌ Cannot connect to API. Run: python api.py';
+                status.style.color = 'red';
+            }
+        }
+        
+        // Ask question to agent
+        async function askAgent(question) {
+            try {
+                const response = await fetch(`${API_URL}/ask`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ question: question })
+                });
+                
+                const data = await response.json();
+                return data.answer;
+            } catch (error) {
+                return 'Error: Cannot connect to agent. Make sure API is running on port 8001.';
+            }
+        }
+        
+        // Send message
+        async function sendMessage() {
+            const input = document.getElementById('question');
+            const question = input.value.trim();
+            const sendBtn = document.getElementById('sendBtn');
+            
+            if (!question) return;
+            
+            const messages = document.getElementById('messages');
+            
+            // Add user message
+            messages.innerHTML += `
+                <div class="message user-message">${question}</div>
+            `;
+            
+            // Clear input
+            input.value = '';
+            
+            // Disable button
+            sendBtn.disabled = true;
+            
+            // Add loading
+            messages.innerHTML += `
+                <div class="message bot-message loading" id="loading">🤔 Analyzing...</div>
+            `;
+            
+            // Scroll to bottom
+            messages.scrollTop = messages.scrollHeight;
+            
+            // Get answer
+            const answer = await askAgent(question);
+            
+            // Remove loading
+            const loadingElement = document.getElementById('loading');
+            if (loadingElement) loadingElement.remove();
+            
+            // Add answer
+            messages.innerHTML += `
+                <div class="message bot-message">${answer}</div>
+            `;
+            
+            // Enable button
+            sendBtn.disabled = false;
+            
+            // Scroll to bottom
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        // Quick ask
+        function quickAsk(question) {
+            document.getElementById('question').value = question;
+            sendMessage();
+        }
+        
+        // Check connection on load
+        checkConnection();
+    </script>
+</body>
+</html>

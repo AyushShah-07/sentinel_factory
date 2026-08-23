@@ -1,12 +1,14 @@
 package com.sentinelfactory.backend.service;
 
+import java.util.List;
+
+import org.springframework.stereotype.Service;
+
 import com.sentinelfactory.backend.entity.Alert;
 import com.sentinelfactory.backend.entity.Event;
 import com.sentinelfactory.backend.repository.EventRepository;
-import org.springframework.stereotype.Service;
 
-import java.util.List;
-
+// Handles event database operations and creates alerts for danger events
 @Service
 public class EventService {
 
@@ -21,6 +23,7 @@ public class EventService {
         this.alertService = alertService;
     }
 
+    // Saves event and generates alert if danger zone detected
     public Event saveEvent(Event event) {
 
         System.out.println("===== EVENT SERVICE =====");
@@ -34,21 +37,30 @@ public class EventService {
         System.out.println("Camera ID   : " + savedEvent.getCameraId());
         System.out.println("Risk Score  : " + savedEvent.getRiskScore());
 
-        // Check whether this event is dangerous
+        // If event is danger zone, create an alert
         if ("DANGER_ZONE".equalsIgnoreCase(savedEvent.getEventType())) {
 
             System.out.println("===== DANGER DETECTED =====");
 
             Alert alert = new Alert();
 
+            // Copy event ID
             alert.setEventId(savedEvent.getEventId());
-            alert.setAlertType("DANGER_ZONE");
-            alert.setSeverity("HIGH");
-            alert.setMessage("Employee entered danger zone");
-            alert.setZone(savedEvent.getZone());
-            alert.setRiskScore(savedEvent.getRiskScore());
+
+            // Set incident type (from event type)
+            alert.setIncidentType("DANGER");  // ✅ Changed from setAlertType
+
+            // Set zone name from event zone (NEW field)
+            alert.setZoneName(savedEvent.getZone());  // ✅ Changed from setZone
+
+            // Camera ID from event
             alert.setCameraId(savedEvent.getCameraId());
+
+            // Status always ACTIVE
             alert.setStatus("ACTIVE");
+
+            // Note: personId, picture, dwellSeconds, timestamp are not set from event
+            // They will be null/default
 
             alertService.saveAlert(alert);
 
@@ -61,10 +73,12 @@ public class EventService {
         return savedEvent;
     }
 
+    // Gets all events
     public List<Event> getAllEvents() {
         return eventRepository.findAll();
     }
 
+    // Gets single event by ID
     public Event getEventById(Long id) {
         return eventRepository.findById(id).orElse(null);
     }

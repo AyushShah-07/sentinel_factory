@@ -6,8 +6,6 @@ const navItems = [
   { path: '/live', label: 'Live Monitoring' },
   { path: '/events', label: 'Events' },
   { path: '/alerts', label: 'Alerts' },
-  { path: '/zones', label: 'Safety Zones' },
-  { path: '/devices', label: 'Devices' },
   { path: '/agent', label: 'AI Safety Agent' },
 ]
 
@@ -34,16 +32,6 @@ export const Sidebar = () => {
         ))}
       </nav>
 
-      <div className="sidebar__footer">
-        <div>
-          <span className="sidebar__footer-label">Backend</span>
-          <span className="sidebar__footer-status status-safe">Unknown</span>
-        </div>
-        <div>
-          <span className="sidebar__footer-label">MQTT</span>
-          <span className="sidebar__footer-status status-warning">Unknown</span>
-        </div>
-      </div>
     </aside>
   )
 }

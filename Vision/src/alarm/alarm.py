@@ -63,6 +63,8 @@ class Alarm:
 
     def __init__(self, enabled=True, frequency=1000, beep_ms=180, gap_ms=90,
                  beeps_per_burst=4, pause_ms=600, repeat=True):
+        # Set up the alarm with all its settings
+        # Store beep pattern values and create empty thread
         self.enabled = bool(enabled)
         self.frequency = int(max(_MIN_FREQUENCY, min(int(frequency), _MAX_FREQUENCY)))
         self.beep_ms = max(20, int(beep_ms))
@@ -81,6 +83,8 @@ class Alarm:
     @classmethod
     def from_config(cls, cfg):
         """Build the alarm described by config.py."""
+        # Create alarm using settings from config.py file
+
         return cls(
             enabled=getattr(cfg, "ENABLE_PC_ALARM", True),
             frequency=getattr(cfg, "ALARM_BEEP_FREQUENCY", 1000),
@@ -101,6 +105,9 @@ class Alarm:
         Safe to call repeatedly: while the alarm is already sounding this is a
         no-op and NO second thread is created.
         """
+        # Start beeping if not already beeping
+        # Creates a new thread so main program doesn't freeze
+        # Returns True if alarm actually started
         if not self.enabled:
             return False
 
@@ -125,6 +132,9 @@ class Alarm:
         interrupted -- so silence arrives within one beep length (ALARM_BEEP_
         DURATION_MS, 180 ms by default).
         """
+        # Stop all beeping immediately
+        # Waits for current beep to finish first
+        # Returns True if alarm was actually running
         with self._lock:
             if not self._active:
                 return False
@@ -138,6 +148,8 @@ class Alarm:
 
     def is_alarm_active(self):
         """True while the alarm is sounding."""
+         # Check if alarm is currently beeping
+        # Returns True or False
         with self._lock:
             return self._active
 
@@ -151,6 +163,9 @@ class Alarm:
         Nothing in here may raise: an audio device that refuses to beep must not
         take down a running safety monitor.
         """
+         # The beeping pattern that runs in background thread
+        # Beeps in bursts with pauses between
+        # Keeps running until stop_alarm() is called
         try:
             while not self._stop.is_set():
                 for _ in range(self.beeps_per_burst):
@@ -179,6 +194,10 @@ class Alarm:
         equivalent, so we ring the terminal bell and sleep for the same duration:
         the timing stays correct and the app still runs.
         """
+         # Make one single beep sound
+        # On Windows: uses PC speaker (loud)
+        # On Mac/Linux: uses terminal bell (quiet)
+        # Blocks/sleeps for the beep duration
         try:
             if winsound is not None:
                 winsound.Beep(self.frequency, self.beep_ms)

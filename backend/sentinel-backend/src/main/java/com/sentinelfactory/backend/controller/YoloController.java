@@ -32,63 +32,61 @@ public class YoloController {
         this.alertService = alertService;
     }
 
-        // =========================================================
-// PERSON DETECTION
-// =========================================================
+    // =========================================================
+    // PERSON DETECTION - UNCHANGED
+    // =========================================================
 
-@PostMapping("/detections")
-public ResponseEntity<List<Event>> receiveDetections(
-        @RequestParam String cameraId,
-        @RequestBody List<PersonDetectionRequest> detections) {
+    @PostMapping("/detections")
+    public ResponseEntity<List<Event>> receiveDetections(
+            @RequestParam String cameraId,
+            @RequestBody List<PersonDetectionRequest> detections) {
 
-    List<Event> savedEvents = new ArrayList<>();
+        List<Event> savedEvents = new ArrayList<>();
 
-    for (PersonDetectionRequest request : detections) {
+        for (PersonDetectionRequest request : detections) {
 
-        Event event = new Event();
+            Event event = new Event();
 
-        event.setEventId(
-                "YOLO-" + System.currentTimeMillis()
-        );
+            event.setEventId(
+                    "YOLO-" + System.currentTimeMillis()
+            );
 
-        event.setTimestamp(
-                request.getTimestamp()
-        );
+            event.setTimestamp(
+                    request.getTimestamp()
+            );
 
-        event.setCameraId(
-                cameraId
-        );
+            event.setCameraId(
+                    cameraId
+            );
 
-        event.setEventType(
-                request.getEvent()
-        );
+            event.setEventType(
+                    request.getEvent()
+            );
 
-        event.setTrackId(
-                request.getPersonId()
-        );
+            event.setTrackId(
+                    request.getPersonId()
+            );
 
-        event.setEmployeeId(null);
+            event.setEmployeeId(null);
+            event.setZone(null);
+            event.setMachineState(null);
+            event.setRiskScore(null);
 
-        event.setZone(null);
+            Event savedEvent =
+                    eventService.saveEvent(event);
 
-        event.setMachineState(null);
+            savedEvents.add(
+                    savedEvent
+            );
+        }
 
-        event.setRiskScore(null);
-
-        Event savedEvent =
-                eventService.saveEvent(event);
-
-        savedEvents.add(
-                savedEvent
+        return ResponseEntity.ok(
+                savedEvents
         );
     }
 
-    return ResponseEntity.ok(
-            savedEvents
-    );
-}
     // =========================================================
-    // DANGER / WARNING INCIDENTS
+    // DANGER / WARNING INCIDENTS - UPDATED
     // =========================================================
 
     @PostMapping("/incidents")
@@ -96,121 +94,64 @@ public ResponseEntity<List<Event>> receiveDetections(
             @RequestParam String cameraId,
             @RequestBody List<IncidentRequest> incidents) {
 
-        List<Alert> savedAlerts =
-                new ArrayList<>();
+        List<Alert> savedAlerts = new ArrayList<>();
 
         for (IncidentRequest request : incidents) {
 
             Alert alert = new Alert();
 
+            // Generated event ID
             alert.setEventId(
                     "YOLO-" + System.currentTimeMillis()
             );
 
-            // -------------------------------------------------
-            // Main alert fields
-            // -------------------------------------------------
-
-            alert.setAlertType(
-                    request.getIncidentType()
-            );
-
-            alert.setSeverity(
-                    request.getIncidentType()
-            );
-
-            alert.setMessage(
-                    request.getIncidentName()
-            );
-
+            // Camera ID from request param
             alert.setCameraId(
                     cameraId
             );
 
+            // Status - always ACTIVE
             alert.setStatus(
                     "ACTIVE"
             );
 
-            // -------------------------------------------------
-            // Incident details
-            // -------------------------------------------------
+            // =========================================================
+            // FIELDS FROM YOUR JSON - 6 fields only
+            // =========================================================
 
+            // 1. timestamp from JSON
             alert.setTimestamp(
                     request.getTimestamp()
             );
 
+            // 2. person_id from JSON
             alert.setPersonId(
                     request.getPersonId()
             );
 
-            alert.setIncidentName(
-                    request.getIncidentName()
+            // 3. zone_name from JSON (NEW - fixes Unknown zone)
+            alert.setZoneName(
+                    request.getZoneName()
             );
 
-            alert.setSource(
-                    request.getSource()
+            // 4. incident_type from JSON
+            alert.setIncidentType(
+                    request.getIncidentType()
             );
 
-            alert.setBodyZone(
-                    request.getBodyZone()
-            );
-
-            alert.setBodyZoneId(
-                    request.getBodyZoneId()
-            );
-
-            alert.setHandZone(
-                    request.getHandZone()
-            );
-
-            alert.setHandZoneId(
-                    request.getHandZoneId()
-            );
-
+            // 5. picture from JSON (picture_url goes here) - UNCHANGED
             alert.setPicture(
                     request.getPicture()
             );
 
+            // 6. dwell_seconds from JSON
             alert.setDwellSeconds(
                     request.getDwellSeconds()
             );
 
-            // -------------------------------------------------
-            // Zone shown in existing alert table
-            // -------------------------------------------------
-
-            if (request.getBodyZoneId() != null) {
-
-                alert.setZone(
-                        request.getBodyZoneId()
-                );
-
-            } else if (request.getHandZoneId() != null) {
-
-                alert.setZone(
-                        request.getHandZoneId()
-                );
-
-            } else {
-
-                alert.setZone(
-                        request.getBodyZone()
-                );
-            }
-
-            // -------------------------------------------------
-            // Risk is currently not included in the Python
-            // incident record.
-            // -------------------------------------------------
-
-            alert.setRiskScore(
-                    null
-            );
-
+            // Save alert
             Alert savedAlert =
-                    alertService.saveAlert(
-                            alert
-                    );
+                    alertService.saveAlert(alert);
 
             savedAlerts.add(
                     savedAlert
