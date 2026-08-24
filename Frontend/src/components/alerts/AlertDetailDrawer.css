@@ -103,7 +103,62 @@
   font-weight: 600;
 }
 
-.alert-image img {
+/* ✅ ADD: Zoom Controls */
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.zoom-controls button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #29333d;
+  background: #1f2830;
+  color: #9cb3c7;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.zoom-controls button:hover {
+  background: #2a3540;
+  color: #eef5ff;
+}
+
+.zoom-controls .zoom-reset {
+  width: auto;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.zoom-controls span {
+  min-width: 45px;
+  text-align: center;
+  color: #7d8a9a;
+  font-size: 12px;
+}
+
+/* ✅ ADD: Image Container with Zoom */
+.image-container {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #29333d;
+  border-radius: 12px;
+  background: #05080b;
+  cursor: zoom-in;
+}
+
+.image-container.zoomed {
+  cursor: zoom-out;
+}
+
+.image-container img {
   display: block;
   width: 100%;
   max-width: 100%;
@@ -112,8 +167,45 @@
   object-fit: contain;
   object-position: center;
   background: #05080b;
-  border: 1px solid #29333d;
-  border-radius: 12px;
+  border: none;
+  border-radius: 0;
+  transition: transform 0.3s ease;
+  transform-origin: 0 0;
+}
+
+/* ✅ ADD: Fullscreen Modal for Zoomed Image */
+.image-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  cursor: zoom-out;
+}
+
+.image-modal img {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+}
+
+.image-modal .close-modal {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: #1f2830;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.image-modal .close-modal:hover {
+  background: #2a3540;
 }
 
 /* -------------------------------------------------------

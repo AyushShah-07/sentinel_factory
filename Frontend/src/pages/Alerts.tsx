@@ -6,14 +6,13 @@ import { EmptyState } from '../components/common/EmptyState'
 import { AlertDetailDrawer } from '../components/alerts/AlertDetailDrawer'
 import type { AlertRecord } from '../types'
 
-// ✅ UPDATED: Only JSON fields + Picture
 const alertHeaders = [
-  'Alert ID',    // Database primary key
-  'Type',        // From JSON - incident_type
-  'Person',      // From JSON - person_id
-  'Zone',        // From JSON - zone_name
-  'Dwell',       // From JSON - dwell_seconds
-  'Picture',     // From JSON - picture_url
+  'Alert ID',
+  'Type',
+  'Person',
+  'Zone',
+  'Dwell',
+  'Picture',
 ]
 
 export const Alerts = () => {
@@ -28,17 +27,16 @@ export const Alerts = () => {
   const [selectedAlert, setSelectedAlert] =
     useState<AlertRecord | null>(null)
 
-  // Filter alerts based on search query
   const filtered = useMemo(() => {
     const query = search.toLowerCase()
 
     return alerts.filter((alert) =>
       [
-        alert.id.toString(),
-        alert.incidentType,
-        alert.personId,
-        alert.zoneName,
-        alert.dwellSeconds?.toString(),
+        alert.id?.toString(),
+        alert.incident_type,      // ✅ Changed from incidentType
+        alert.person_id,          // ✅ Changed from personId
+        alert.zone_name,          // ✅ Changed from zoneName
+        alert.dwell_seconds?.toString(),  // ✅ Changed from dwellSeconds
       ]
         .filter(Boolean)
         .some((value) =>
@@ -50,7 +48,6 @@ export const Alerts = () => {
     )
   }, [alerts, search])
 
-  // Get image URL from backend - UNCHANGED
   const getImageUrl = (alert: AlertRecord) => {
     if (!alert.picture) {
       return null
@@ -110,26 +107,26 @@ export const Alerts = () => {
                     onClick={() => setSelectedAlert(alert)}
                     style={{ cursor: 'pointer' }}
                   >
-                    {/* Alert ID - from database */}
+                    {/* Alert ID */}
                     <td>{alert.id}</td>
 
-                    {/* Type - from JSON incident_type */}
-                    <td>{alert.incidentType ?? 'Unknown'}</td>
+                    {/* Type - snake_case */}
+                    <td>{alert.incident_type ?? 'Unknown'}</td>
 
-                    {/* Person - from JSON person_id */}
-                    <td>{alert.personId ?? 'Unknown'}</td>
+                    {/* Person - snake_case */}
+                    <td>{alert.person_id ?? 'Unknown'}</td>
 
-                    {/* Zone - from JSON zone_name */}
-                    <td>{alert.zoneName ?? 'Unknown'}</td>
+                    {/* Zone - snake_case */}
+                    <td>{alert.zone_name ?? 'Unknown'}</td>
 
-                    {/* Dwell - from JSON dwell_seconds */}
+                    {/* Dwell - snake_case */}
                     <td>
-                      {alert.dwellSeconds != null
-                        ? `${alert.dwellSeconds}s`
+                      {alert.dwell_seconds != null
+                        ? `${alert.dwell_seconds}s`
                         : '--'}
                     </td>
 
-                    {/* Picture - from JSON picture_url - UNCHANGED */}
+                    {/* Picture */}
                     <td>
                       {imageUrl ? (
                         <img

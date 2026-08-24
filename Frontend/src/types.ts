@@ -8,25 +8,16 @@ export interface EventRecord {
   timestamp: string
 }
 
+// types.ts
 export interface AlertRecord {
-  id: number
-
-  status: string
-
-  message?: string
-
-  timestamp?: string
-
-  eventId?: string | number
-
-  cameraId?: string
-
-  personId?: string | null
-
-  zoneName: string        // From JSON - zone_name (NEW)
-  incidentType: string    // From JSON - incident_type (NEW)
-
-  picture?: string | null
-
-  dwellSeconds?: number | null
+    id: number
+    event_id: string
+    person_id: string
+    zone_name: string
+    incident_type: string
+    picture: string
+    dwell_seconds: number
+    timestamp: string
+    camera_id: string
+    status: string
 }
