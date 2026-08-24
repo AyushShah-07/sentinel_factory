@@ -7,7 +7,6 @@ import { Overview } from './pages/Overview'
 import { LiveMonitoring } from './pages/LiveMonitoring'
 import { Events } from './pages/Events'
 import { Alerts } from './pages/Alerts'
-import { SafetyAgent } from './pages/SafetyAgent'
 import './App.css'
 import './components/common/LoadingState.css'
 import './components/common/ErrorState.css'
@@ -22,7 +21,6 @@ import './components/dashboard/RecentAlerts.css'
 import './components/video/LiveVideoPlayer.css'
 import './components/alerts/AlertDetailDrawer.css'
 import './components/chat/SafetyChat.css'
-import './pages/SafetyAgent.css'
 import { SafetyChat } from './components/chat/SafetyChat'
 
 function App() {
@@ -40,7 +38,6 @@ function App() {
                 <Route path="/live" element={<LiveMonitoring />} />
                 <Route path="/events" element={<Events />} />
                 <Route path="/alerts" element={<Alerts />} />
-                <Route path="/agent" element={<SafetyAgent />} />
               </Routes>
               <footer className="app-footer">
                 Advisory monitoring system. Does not replace machine guarding, emergency stops, interlocks, or established safety procedures.

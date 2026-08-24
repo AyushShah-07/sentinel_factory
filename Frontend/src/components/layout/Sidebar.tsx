@@ -6,7 +6,6 @@ const navItems = [
   { path: '/live', label: 'Live Monitoring' },
   { path: '/events', label: 'Events' },
   { path: '/alerts', label: 'Alerts' },
-  { path: '/agent', label: 'AI Safety Agent' },
 ]
 
 export const Sidebar = () => {

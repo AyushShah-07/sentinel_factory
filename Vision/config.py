@@ -36,7 +36,7 @@ IOU_THRESHOLD = 0.45
  
 # Image size fed to the network. 640 is the YOLOv8 default.
 # Drop to 480 or 416 for more FPS on a weak CPU (accuracy drops a little).
-INFERENCE_IMGSZ = 640
+INFERENCE_IMGSZ = 320
  
 # "cpu", "cuda", "0", or None to let ultralytics pick automatically.
 DEVICE = None
@@ -525,7 +525,7 @@ POSE_MODEL_DOWNLOAD_NAME = "yolov8n-pose.pt"
  
 # Run pose only on every Nth frame to claw back FPS. 1 = every frame.
 # The hand confirmation counters below count POSE frames, not camera frames.
-POSE_EVERY_N_FRAMES = 2
+POSE_EVERY_N_FRAMES = 5
  
 POSE_CONFIDENCE_THRESHOLD = 0.4   # minimum confidence for a pose detection
 POSE_KEYPOINT_CONFIDENCE = 0.5    # minimum confidence for one keypoint

@@ -1,52 +1,93 @@
+/**
+ * Alert.java
+ * 
+ * PURPOSE: JPA Entity class representing the "alerts" table in MySQL database.
+ * This class maps Java objects to database records and vice versa.
+ * 
+ * TABLE STRUCTURE:
+ * alerts (
+ *   id BIGINT PRIMARY KEY AUTO_INCREMENT,
+ *   event_id VARCHAR,
+ *   person_id VARCHAR,
+ *   zone_name VARCHAR,
+ *   incident_type VARCHAR,
+ *   picture VARCHAR,
+ *   dwell_seconds DOUBLE,
+ *   timestamp VARCHAR,
+ *   camera_id VARCHAR,
+ *   status VARCHAR,
+ *   created_at TIMESTAMP,
+ *   updated_at TIMESTAMP
+ * )
+ */
+
 package com.sentinelfactory.backend.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.fasterxml.jackson.annotation.JsonProperty;              // Maps field to specific DB column
 
-@Entity
-@Table(name = "alerts")
+import jakarta.persistence.Column;             // Marks class as JPA entity
+import jakarta.persistence.Entity;     // Auto-generates ID values
+import jakarta.persistence.GeneratedValue;     // Specifies ID generation strategy
+import jakarta.persistence.GenerationType;                 // Marks primary key field
+import jakarta.persistence.Id;              // Specifies table name
+import jakarta.persistence.Table; // For JSON serialization
+
+@Entity                                         // Tells JPA this is a database entity
+@Table(name = "alerts")                        // Maps to "alerts" table in MySQL
 public class Alert {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id                                          // Primary key
+    @GeneratedValue(strategy = GenerationType.IDENTITY) // Auto-increment
     private Long id;
 
-    @Column(name = "event_id")
+    @Column(name = "event_id")                   // Maps to "event_id" column
+    @JsonProperty("event_id")                    // JSON response will use "event_id"
     private String eventId;
 
-    @Column(name = "person_id")
+    @Column(name = "person_id")                  // Maps to "person_id" column
+    @JsonProperty("person_id")                   // JSON response will use "person_id"
     private String personId;
 
-    @Column(name = "zone_name")
+    @Column(name = "zone_name")                  // Maps to "zone_name" column
+    @JsonProperty("zone_name")                   // JSON response will use "zone_name"
     private String zoneName;
 
-    @Column(name = "incident_type")
+    @Column(name = "incident_type")              // Maps to "incident_type" column
+    @JsonProperty("incident_type")               // JSON response will use "incident_type"
     private String incidentType;
 
-    @Column(name = "picture")
-    private String picture;
+    @Column(name = "picture")                    // Maps to "picture" column
+    @JsonProperty("picture")                     // JSON response will use "picture"
+    private String picture;                      // Stores image URL/path
 
-    @Column(name = "dwell_seconds")
-    private Double dwellSeconds;
+    @Column(name = "dwell_seconds")              // Maps to "dwell_seconds" column
+    @JsonProperty("dwell_seconds")               // JSON response will use "dwell_seconds"
+    private Double dwellSeconds;                 // Time spent in zone
 
-    private String timestamp;
+    @JsonProperty("timestamp")                   // JSON response will use "timestamp"
+    private String timestamp;                    // Incident timestamp
 
-    @Column(name = "camera_id")
+    @Column(name = "camera_id")                  // Maps to "camera_id" column
+    @JsonProperty("camera_id")                   // JSON response will use "camera_id"
     private String cameraId;
 
-    private String status;
+    @JsonProperty("status")                      // JSON response will use "status"
+    private String status;                       // Active, resolved, etc.
 
+    // ============ CONSTRUCTOR ============
+    // Default constructor required by JPA
     public Alert() {
     }
 
     // ============ GETTERS AND SETTERS ============
+    // Required for JPA and Jackson to access private fields
 
     public Long getId() {
         return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public String getEventId() {
